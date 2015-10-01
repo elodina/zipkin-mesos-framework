@@ -1,0 +1,52 @@
+apply plugin: 'scala'
+apply plugin: 'idea'
+
+version = '0.1'
+
+jar.archiveName = "zipkin-mesos-${version}.jar"
+
+repositories {
+    mavenCentral()
+}
+
+buildDir = 'out/gradle'
+libsDirName = '../../'
+
+sourceSets {
+    main {
+        scala { srcDirs = ['src/scala'] }
+    }
+    test {
+        scala { srcDirs = ['src/test'] }
+    }
+}
+
+dependencies {
+    compile "org.scala-lang:scala-library:2.10.3"
+    compile "org.apache.mesos:mesos:0.21.1"
+    compile "com.google.protobuf:protobuf-java:2.5.0"
+    compile "log4j:log4j:1.2.16"
+    compile "net.sf.jopt-simple:jopt-simple:4.8"
+    compile "org.eclipse.jetty:jetty-http:9.0.4.v20130625"
+    compile "org.eclipse.jetty:jetty-io:9.0.4.v20130625"
+    compile "org.eclipse.jetty:jetty-security:9.0.4.v20130625"
+    compile "org.eclipse.jetty:jetty-server:9.0.4.v20130625"
+    compile "org.eclipse.jetty:jetty-servlet:9.0.4.v20130625"
+    compile "org.eclipse.jetty:jetty-util:9.0.4.v20130625"
+    compile "javax.servlet:javax.servlet-api:3.0.1"
+    testCompile 'junit:junit:4.12'
+}
+
+jar {
+    dependsOn 'test'
+    doFirst {
+        from(configurations.compile.collect { it.isDirectory() ? it : zipTree(it) }) {
+            exclude "*"
+            exclude "about_files/*"
+            exclude "META-INF/*.SF"
+            exclude "META-INF/*.DSA"
+            exclude "META-INF/*.RSA"
+        }
+    }
+    manifest.attributes("Main-Class": "net.elodina.mesos.zipkin.cli.Cli")
+}
