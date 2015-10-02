@@ -27,7 +27,7 @@ object HttpServer {
     server = new Server(threadPool)
     val connector = new ServerConnector(server)
     connector.setPort(Config.apiPort)
-    if (Config.bindAddress != null) connector.setHost(Config.bindAddress.resolve())
+    Config.bindAddress.foreach(ba => connector.setHost(ba.resolve()))
     connector.setIdleTimeout(60 * 1000)
 
     val handler = new ServletContextHandler

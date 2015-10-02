@@ -13,10 +13,16 @@ object SchedulerCli {
   def handle(args: Array[String], help: Boolean = false): Unit = {
     val parser = newParser()
 
+    def configureCLParser(optionParser: OptionParser, optionsMap: Map[String, String]) = {
+      optionsMap.foreach { it =>
+        optionParser.accepts(it._1, it._2).withRequiredArg().ofType(classOf[String])
+      }
+    }
+
     parser.accepts("debug", "Debug mode. Default - " + Config.debug)
       .withRequiredArg().ofType(classOf[java.lang.Boolean])
 
-    configureParser(parser,
+    configureCLParser(parser,
       Map(
         "storage" -> ("""Storage for cluster state. Examples:
                         | - file:zipkin-mesos.json
@@ -62,91 +68,81 @@ object SchedulerCli {
         throw new Error(e.getMessage)
     }
 
-    loadConfig(options, configArg)
+    fetchConfigFile(options, configArg).foreach { configFile =>
+      printLine("Loading config defaults from " + configFile)
+      Config.loadFromFile(configFile)
+    }
 
+    loadConfigFromArgs(options)
+
+    Scheduler.start()
+  }
+
+  private def fetchConfigFile(options: OptionSet, configArg: NonOptionArgumentSpec[String]): Option[File] = {
+    Option(options.valueOf(configArg)) match {
+      case Some(configArgValue) =>
+        val configFile = new File(configArgValue)
+        if (configFile.exists()) throw new Error(s"config-file $configFile not found")
+        Some(configFile)
+      case None if Config.DEFAULT_FILE.exists() =>
+        Some(Config.DEFAULT_FILE)
+      case _ => None
+    }
+  }
+
+  private def loadConfigFromArgs(options: OptionSet): Unit = {
     val provideOption = "Provide either cli option or config default value"
 
-    readProperty[java.lang.Boolean]("debug", options, { _ => Config.debug = _ })
+    def readCLProperty[E](propName: String, options: OptionSet) = {Option(options.valueOf(propName).asInstanceOf[E])}
 
-    readProperty[String]("storage", options, { _ => Config.storage = _ })
+    readCLProperty[java.lang.Boolean]("debug", options).foreach(Config.debug = _)
 
-    readProperty[String]("master", options, { _ => Config.master = _ })
+    readCLProperty[String]("storage", options).foreach(Config.storage = _)
 
-    if (Config.master == null) throw new Error(s"Undefined master. $provideOption")
+    readCLProperty[String]("master", options).foreach(x => Config.master = Some(x))
 
-    readProperty[String]("secret", options, { _ => Config.secret = _ })
+    if (Config.master.isEmpty) throw new Error(s"Undefined master. $provideOption")
 
-    readProperty[String]("principal", options, { _ => Config.principal = _ })
+    readCLProperty[String]("secret", options).foreach(x => Config.secret = Some(x))
 
-    readProperty[String]("user", options, { _ => Config.user = _ })
+    readCLProperty[String]("principal", options).foreach(x => Config.principal = Some(x))
 
-    readProperty[String]("framework-name", options, { _ => Config.frameworkName = _ })
+    readCLProperty[String]("user", options).foreach(x => Config.user = Some(x))
 
-    readProperty[String]("framework-role", options, { _ => Config.frameworkRole = _ })
+    readCLProperty[String]("framework-name", options).foreach(Config.frameworkName = _)
 
-    readProperty[String]("framework-timeout", options, {
+    readCLProperty[String]("framework-role", options).foreach(Config.frameworkRole = _)
+
+    readCLProperty[String]("framework-timeout", options).foreach {
       ft => try {
         Config.frameworkTimeout = new Period(ft)
       } catch {
         case e: IllegalArgumentException => throw new Error("Invalid framework-timeout")
       }
-    })
+    }
 
-    readProperty[String]("api", options, { _ => Config.api = _ })
+    readCLProperty[String]("api", options).foreach(x => Config.api = Some(x))
 
-    if (Config.api == null) throw new Error(s"Undefined api. $provideOption")
+    if (Config.api.isEmpty) throw new Error(s"Undefined api. $provideOption")
 
-    readProperty[String]("bind-address", options, {
+    readCLProperty[String]("bind-address", options).foreach {
       ba => try {
-        Config.bindAddress = new BindAddress(ba)
+        Config.bindAddress = Some(new BindAddress(ba))
       } catch {
         case e: IllegalArgumentException => throw new Error("Invalid bind-address")
       }
-    })
-
-    readProperty[String]("zk", options, { _ => Config.zk = _ })
-
-    if (Config.zk == null) throw new Error(s"Undefined zk. $provideOption")
-
-    readProperty("jre", options, { _ => Config.jre = _ })
-
-    if (Config.jre != null && !Config.jre.exists()) throw new Error("JRE file doesn't exists")
-
-    readProperty[String]("log", options, { log => Config.log = new File(log) })
-
-    if (Config.log != null) printLine(s"Logging to ${Config.log}")
-
-    Scheduler.start()
-  }
-
-  private def loadConfig(options: OptionSet, configArg: NonOptionArgumentSpec[String]): Unit = {
-    for {
-      configFile <- Option(options.valueOf(configArg)) match {
-        case Some(configArgValue) =>
-          val configFile = new File(configArgValue)
-          if (configFile.exists()) throw new Error(s"config-file $configFile not found")
-          Some(configFile)
-        case None if Config.DEFAULT_FILE.exists() =>
-          Some(Config.DEFAULT_FILE)
-        case _ => None
-      }
-    } yield {
-      printLine("Loading config defaults from " + configFile)
-      Config.load(configFile)
     }
-  }
 
-  private def readProperty[E](propName: String, options: OptionSet, gotValue: E => Unit): Unit = {
-    for {
-      propValue <- Option(options.valueOf(propName).asInstanceOf[E])
-    } yield {
-      gotValue(propValue)
-    }
-  }
+    readCLProperty[String]("zk", options).foreach(x => Config.zk = Some(x))
 
-  private def configureParser(optionsParser: OptionParser, optionsMap: Map[String, String]): Unit = {
-    optionsMap.map { it =>
-      optionsParser.accepts(it._1, it._2).withRequiredArg().ofType(classOf[String])
-    }
+    if (Config.zk.isEmpty) throw new Error(s"Undefined zk. $provideOption")
+
+    readCLProperty[String]("jre", options).foreach(x => Config.jre = Some(new File(x)))
+
+    Config.jre.foreach(jre => if (!jre.exists()) throw new Error("JRE file doesn't exists"))
+
+    readCLProperty[String]("log", options).foreach(x => Config.log = Some(new File(x)))
+
+    Config.log.foreach(log => printLine(s"Logging to $log"))
   }
 }

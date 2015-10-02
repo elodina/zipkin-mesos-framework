@@ -43,7 +43,7 @@ object Scheduler extends org.apache.mesos.Scheduler {
     HttpServer.start()
 
     val frameworkBuilder = FrameworkInfo.newBuilder()
-    frameworkBuilder.setUser(if (Config.user != null) Config.user else "")
+    frameworkBuilder.setUser(Config.user.getOrElse(""))
     //if (cluster.frameworkId != null) frameworkBuilder.setId(FrameworkID.newBuilder().setValue(cluster.frameworkId))
     frameworkBuilder.setRole(Config.frameworkRole)
 
@@ -52,17 +52,18 @@ object Scheduler extends org.apache.mesos.Scheduler {
     frameworkBuilder.setCheckpoint(true)
 
     var credsBuilder: Credential.Builder = null
-    if (Config.principal != null) {
-      frameworkBuilder.setPrincipal(Config.principal)
+    Config.principal.foreach {
+      principal =>
+        frameworkBuilder.setPrincipal(principal)
 
-      credsBuilder = Credential.newBuilder()
-      credsBuilder.setPrincipal(Config.principal)
-      if (Config.secret != null) credsBuilder.setSecret(ByteString.copyFromUtf8(Config.secret))
+        credsBuilder = Credential.newBuilder()
+        credsBuilder.setPrincipal(principal)
+        Config.secret.foreach { secret => credsBuilder.setSecret(ByteString.copyFromUtf8(secret)) }
     }
 
     val driver =
-      if (credsBuilder != null) new MesosSchedulerDriver(Scheduler, frameworkBuilder.build, Config.master, credsBuilder.build)
-      else new MesosSchedulerDriver(Scheduler, frameworkBuilder.build, Config.master)
+      if (credsBuilder != null) new MesosSchedulerDriver(Scheduler, frameworkBuilder.build, Config.getMaster, credsBuilder.build)
+      else new MesosSchedulerDriver(Scheduler, frameworkBuilder.build, Config.getMaster)
 
     Runtime.getRuntime.addShutdownHook(new Thread() {
       override def run() = HttpServer.stop()
@@ -87,9 +88,10 @@ object Scheduler extends org.apache.mesos.Scheduler {
 
     val layout = new PatternLayout("%d [%t] %-5p %c %x - %m%n")
 
-    var appender: Appender = null
-    if (Config.log == null) appender = new ConsoleAppender(layout)
-    else appender = new DailyRollingFileAppender(layout, Config.log.getPath, "'.'yyyy-MM-dd")
+    val appender = Config.log match {
+      case Some(log) => new DailyRollingFileAppender(layout, log.getPath, "'.'yyyy-MM-dd")
+      case None => new ConsoleAppender(layout)
+    }
 
     root.addAppender(appender)
   }
