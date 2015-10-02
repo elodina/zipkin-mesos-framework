@@ -14,10 +14,10 @@ libsDirName = '../../'
 
 sourceSets {
     main {
-        scala { srcDirs = ['src/scala'] }
+        scala { srcDirs = ['src/main/scala'] }
     }
     test {
-        scala { srcDirs = ['src/test'] }
+        scala { srcDirs = ['src/test/scala'] }
     }
 }
 
@@ -48,5 +48,5 @@ jar {
             exclude "META-INF/*.RSA"
         }
     }
-    manifest.attributes("Main-Class": "net.elodina.mesos.zipkin.cli.Cli")
+    manifest.attributes("Main-Class": "net.elodina.mesos.zipkin.Cli")
 }
