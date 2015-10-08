@@ -3,6 +3,8 @@ package net.elodina.mesos.zipkin
 import java.io.{PrintStream, FileInputStream, FileReader, File}
 import java.util
 import java.util.Properties
+import net.elodina.mesos.zipkin.utils.Util
+
 import scala.collection.JavaConversions._
 
 import joptsimple.{BuiltinHelpFormatter, OptionParser, OptionException, OptionSet}
@@ -70,8 +72,8 @@ package object cli {
       return
     }
 
-    if (System.getenv("KM_API") != null) {
-      api = System.getenv("KM_API")
+    if (System.getenv("ZM_API") != null) {
+      api = System.getenv("ZM_API")
       return
     }
 

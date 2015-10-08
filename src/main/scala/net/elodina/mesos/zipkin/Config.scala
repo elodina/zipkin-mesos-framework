@@ -66,6 +66,10 @@ object Config {
     master.getOrElse(throw new Error("master not initialized"))
   }
 
+  def getZk: String = {
+    master.getOrElse(throw new Error("zookeeper not initialized"))
+  }
+
   private[zipkin] def loadFromFile(file: File): Unit = {
     val props: Properties = new Properties()
     val stream: FileInputStream = new FileInputStream(file)

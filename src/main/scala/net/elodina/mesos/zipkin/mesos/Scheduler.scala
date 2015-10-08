@@ -2,49 +2,88 @@ package net.elodina.mesos.zipkin.mesos
 
 
 import java.util
+import java.util.{Collections, Date}
 
-import _root_.net.elodina.mesos.zipkin.Config
-import _root_.net.elodina.mesos.zipkin.http.HttpServer
+import net.elodina.mesos.zipkin.Config
+import net.elodina.mesos.zipkin.http.HttpServer
+import net.elodina.mesos.zipkin.storage.Cluster
+import net.elodina.mesos.zipkin.utils.Str
+import net.elodina.mesos.zipkin.zipkin.{Reconciling, ZipkinComponent}
 import com.google.protobuf.ByteString
 import org.apache.log4j._
 import org.apache.mesos.Protos._
 import org.apache.mesos.{MesosSchedulerDriver, SchedulerDriver}
+import scala.collection.JavaConversions._
+import scala.concurrent.duration._
+import scala.language.postfixOps
 
 object Scheduler extends org.apache.mesos.Scheduler {
 
+  private[zipkin] val cluster = Cluster()
   private val logger: Logger = Logger.getLogger(this.getClass)
   private var driver: SchedulerDriver = null
 
-  override def offerRescinded(driver: SchedulerDriver, offerId: OfferID): Unit = ???
+  def registered(driver: SchedulerDriver, id: FrameworkID, master: MasterInfo): Unit = {
+    logger.info("[registered] framework:" + Str.id(id.getValue) + " master:" + Str.master(master))
 
-  override def disconnected(driver: SchedulerDriver): Unit = ???
+    cluster.frameworkId = Some(id.getValue)
+    cluster.save()
 
-  override def reregistered(driver: SchedulerDriver, masterInfo: MasterInfo): Unit = ???
+    this.driver = driver
+    reconcileTasks(force = true)
+  }
 
-  override def slaveLost(driver: SchedulerDriver, slaveId: SlaveID): Unit = ???
+  def reregistered(driver: SchedulerDriver, master: MasterInfo): Unit = {
+    logger.info("[reregistered] master:" + Str.master(master))
+    this.driver = driver
+    reconcileTasks(force = true)
+  }
 
-  override def error(driver: SchedulerDriver, message: String): Unit = ???
+  def resourceOffers(driver: SchedulerDriver, offers: util.List[Offer]): Unit = {
+    logger.info("[resourceOffers]\n" + Str.offers(offers))
+    //TODO: tryAcceptOffer
+  }
 
-  override def frameworkMessage(driver: SchedulerDriver, executorId: ExecutorID, slaveId: SlaveID, data: Array[Byte]): Unit = ???
+  def offerRescinded(driver: SchedulerDriver, id: OfferID): Unit = {
+    logger.info("[offerRescinded] " + Str.id(id.getValue))
+  }
 
-  override def statusUpdate(driver: SchedulerDriver, status: TaskStatus): Unit = ???
+  def statusUpdate(driver: SchedulerDriver, status: TaskStatus): Unit = {
+    logger.info("[statusUpdate] " + Str.taskStatus(status))
+    //TODO: onChangeStatus(status)
+  }
 
-  override def resourceOffers(driver: SchedulerDriver, offers: util.List[Offer]): Unit = ???
+  def frameworkMessage(driver: SchedulerDriver, executorId: ExecutorID, slaveId: SlaveID, data: Array[Byte]): Unit = {
+    logger.info("[frameworkMessage] executor:" + Str.id(executorId.getValue) + " slave:" + Str.id(slaveId.getValue) + " data: " + new String(data))
+  }
 
-  override def registered(driver: SchedulerDriver, frameworkId: FrameworkID, masterInfo: MasterInfo): Unit = ???
+  def disconnected(driver: SchedulerDriver): Unit = {
+    logger.info("[disconnected]")
+    this.driver = null
+  }
 
-  override def executorLost(driver: SchedulerDriver, executorId: ExecutorID, slaveId: SlaveID, status: Int): Unit = ???
+  def slaveLost(driver: SchedulerDriver, id: SlaveID): Unit = {
+    logger.info("[slaveLost] " + Str.id(id.getValue))
+  }
+
+  def executorLost(driver: SchedulerDriver, executorId: ExecutorID, slaveId: SlaveID, status: Int): Unit = {
+    logger.info("[executorLost] executor:" + Str.id(executorId.getValue) + " slave:" + Str.id(slaveId.getValue) + " status:" + status)
+  }
+
+  def error(driver: SchedulerDriver, message: String): Unit = {
+    logger.info("[error] " + message)
+  }
 
   def start() {
     initLogging()
     logger.info(s"Starting ${getClass.getSimpleName}:\n$Config")
 
-    //cluster.load()
+    cluster.load()
     HttpServer.start()
 
     val frameworkBuilder = FrameworkInfo.newBuilder()
     frameworkBuilder.setUser(Config.user.getOrElse(""))
-    //if (cluster.frameworkId != null) frameworkBuilder.setId(FrameworkID.newBuilder().setValue(cluster.frameworkId))
+    cluster.frameworkId.foreach(id => frameworkBuilder.setId(FrameworkID.newBuilder().setValue(id)))
     frameworkBuilder.setRole(Config.frameworkRole)
 
     frameworkBuilder.setName(Config.frameworkName)
@@ -94,5 +133,50 @@ object Scheduler extends org.apache.mesos.Scheduler {
     }
 
     root.addAppender(appender)
+  }
+
+  private[zipkin] val RECONCILE_DELAY = 10 seconds
+  private[zipkin] val RECONCILE_MAX_TRIES = 3
+
+  private[zipkin] var reconciles = 0
+  private[zipkin] var reconcileTime = new Date(0)
+
+  private[zipkin] def reconcileTasks(force: Boolean = false, now: Date = new Date()) {
+    if (now.getTime - reconcileTime.getTime >= RECONCILE_DELAY.toMillis) {
+      if (!cluster.isReconciling) reconciles = 0
+      reconciles += 1
+      reconcileTime = now
+
+      if (reconciles > RECONCILE_MAX_TRIES) {
+        killReconcilingTasks(cluster.getCollectors)
+        killReconcilingTasks(cluster.getQueryServices)
+        killReconcilingTasks(cluster.getWebServices)
+      } else {
+        val statuses = setTasksToReconciling(cluster.getCollectors, force) ++
+          setTasksToReconciling(cluster.getQueryServices, force) ++
+          setTasksToReconciling(cluster.getWebServices, force)
+
+        if (force || statuses.nonEmpty) driver.reconcileTasks(if (force) Collections.emptyList() else statuses)
+      }
+    }
+  }
+
+  private[zipkin] def killReconcilingTasks[E <: ZipkinComponent](componentList: List[E]): Unit = {
+    for (zc <- componentList.filter(b => b.task != null && b.isReconciling)) {
+      logger.info(s"Reconciling exceeded $RECONCILE_MAX_TRIES tries for ${zc.componentName} ${zc.id}, sending killTask for task ${zc.task.id}")
+      driver.killTask(TaskID.newBuilder().setValue(zc.task.id).build())
+      zc.task = null
+    }
+  }
+
+  private[zipkin] def setTasksToReconciling[E <: ZipkinComponent](componentList: List[E], force: Boolean): List[TaskStatus] = {
+    componentList.filter(x => x.task != null && (force || x.isReconciling)).map {zc =>
+      zc.state = Reconciling
+      logger.info(s"Reconciling $reconciles/$RECONCILE_MAX_TRIES state of ${zc.componentName} ${zc.id}, task ${zc.task.id}")
+      TaskStatus.newBuilder()
+        .setTaskId(TaskID.newBuilder().setValue(zc.task.id))
+        .setState(TaskState.TASK_STAGING)
+        .build
+    }
   }
 }
