@@ -1,17 +1,19 @@
-package net.elodina.mesos.zipkin.zipkin
+package net.elodina.mesos.zipkin.components
 
 import java.util.{UUID, Date}
 import net.elodina.mesos.zipkin.utils.{Util, Period, Range}
-import net.elodina.mesos.zipkin.zipkin.ZipkinComponent.Task
+import net.elodina.mesos.zipkin.components.ZipkinComponent.Task
 import org.apache.mesos.Protos.Offer
 import play.api.libs.json._
 import play.api.libs.functional.syntax._
 
 import scala.collection.{mutable, Map}
 import scala.collection.JavaConversions._
+import scala.concurrent.duration.Duration
 
 case class TaskConfig(var cpus: Double = 1, var mem: Double = 256, var ports: List[Range] = Nil,
-                      var envVariables: Map[String, String] = Map(), var flags: Map[String, String] = Map())
+                      var envVariables: Map[String, String] = Map(), var flags: Map[String, String] = Map(),
+                      var configFile: Option[String] = None)
 
 object TaskConfig {
 
@@ -20,7 +22,8 @@ object TaskConfig {
       (__ \ 'mem).read[Double] and
       (__ \ 'ports).read[String].map(Range.parseRanges) and
       (__ \ 'envVariables).read[Map[String, String]] and
-      (__ \ 'flags).read[Map[String, String]])(TaskConfig.apply _)
+      (__ \ 'flags).read[Map[String, String]] and
+      (__ \ 'configFile).readNullable[String])(TaskConfig.apply _)
 
   implicit val writer = new Writes[TaskConfig] {
     def writes(tc: TaskConfig): JsValue = {
@@ -29,15 +32,15 @@ object TaskConfig {
         "mem" -> tc.mem,
         "ports" -> tc.ports.mkString(","),
         "envVariables" -> tc.envVariables.toMap,
-        "flags" -> tc.flags.toMap
+        "flags" -> tc.flags.toMap,
+        "configFile" -> tc.configFile
       )
     }
   }
 }
 
-sealed abstract class ZipkinComponent(_id: String = "0") {
+sealed abstract class ZipkinComponent(val id: String = "0") {
 
-  var id = _id
   var state: State = Added
   private[zipkin] val constraints: mutable.Map[String, List[Constraint]] = new mutable.HashMap[String, List[Constraint]]
   @volatile var task: Task = null
@@ -91,17 +94,15 @@ sealed abstract class ZipkinComponent(_id: String = "0") {
     else ports.flatMap(range => this.config.ports.flatMap(range.overlap)).headOption.map(_.start)
   }
 
-  def waitFor(state: String, timeout: Period): Boolean = {
-    def matches: Boolean = if (state != null) task != null /*&& task.state == state*/ else task == null
-
-    var t = timeout.ms
-    while (t > 0 && !matches) {
+  def waitFor(state: State, timeout: Duration): Boolean = {
+    var t = timeout.toMillis
+    while (t > 0 && this.state != state) {
       val delay = Math.min(100, t)
       Thread.sleep(delay)
       t -= delay
     }
 
-    matches
+    this.state == state
   }
 
   def idFromTaskId(taskId: String): String = {
@@ -156,26 +157,26 @@ object ZipkinComponent {
     (__ \ 'config).read[TaskConfig]
 }
 
-case class Collector(_id: String) extends ZipkinComponent(_id) {
+case class Collector(override val id: String = "0") extends ZipkinComponent(id) {
 
   override def componentName = "collector"
 
   override def setDefaultConfig(): TaskConfig = {
-    TaskConfig(1, 256)
+    TaskConfig(1, 256, Nil, Map(), Map(), Some("collector-dev.scala"))
   }
 }
 
 
-case class QueryService(_id: String) extends ZipkinComponent(_id) {
+case class QueryService(override val id: String = "0") extends ZipkinComponent(id) {
 
   override def componentName = "query"
 
   override def setDefaultConfig(): TaskConfig = {
-    TaskConfig(1, 256)
+    TaskConfig(1, 256, Nil, Map(), Map(), Some("query-dev.scala"))
   }
 }
 
-case class WebService(_id: String) extends ZipkinComponent(_id) {
+case class WebService(override val id: String = "0") extends ZipkinComponent(id) {
 
   override def componentName = "web"
 

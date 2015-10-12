@@ -1,13 +1,14 @@
 package net.elodina.mesos.zipkin.storage
 
+import java.util.concurrent.CopyOnWriteArrayList
+
 import net.elodina.mesos.zipkin.Config
-import net.elodina.mesos.zipkin.zipkin.{ZipkinComponent, WebService, QueryService, Collector}
+import net.elodina.mesos.zipkin.components.{WebService, QueryService, Collector}
 import play.api.libs.json._
 import play.api.libs.functional.syntax._
 
 import scala.collection.mutable
 import scala.collection.JavaConversions._
-import scala.collection.mutable.ListBuffer
 
 case class Cluster(_collectors: List[Collector] = Nil,
                    _webServices: List[WebService] = Nil,
@@ -17,42 +18,13 @@ case class Cluster(_collectors: List[Collector] = Nil,
 
   private val storage = Cluster.newStorage(Config.storage)
 
-  private val collectors: ListBuffer[Collector] = new ListBuffer[Collector]()
-  private val queryServices: ListBuffer[QueryService] = new ListBuffer[QueryService]()
-  private val webServices: ListBuffer[WebService] = new ListBuffer[WebService]()
+  private[zipkin] val collectors: mutable.Buffer[Collector] = new CopyOnWriteArrayList[Collector]()
+  private[zipkin] val queryServices: mutable.Buffer[QueryService] = new CopyOnWriteArrayList[QueryService]()
+  private[zipkin] val webServices: mutable.Buffer[WebService] = new CopyOnWriteArrayList[WebService]()
 
   collectors ++ _collectors
   queryServices ++ _queryServices
   webServices ++ _webServices
-
-  def getCollectors: List[Collector] = collectors.toList
-
-  def getWebServices: List[WebService] = webServices.toList
-
-  def getQueryServices: List[QueryService] = queryServices.toList
-
-  def getCollector(id: String): Option[Collector] = collectors.find(_.id == id)
-
-  def getWebService(id: String): Option[WebService] = webServices.find(_.id == id)
-
-  def getQueryService(id: String): Option[QueryService] = queryServices.find(_.id == id)
-
-  def addCollector(collector: Collector): Collector = addComponent(collector, collectors)
-
-  def addWebService(webService: WebService): WebService = addComponent(webService, webServices)
-
-  def addQueryService(queryService: QueryService): QueryService = addComponent(queryService, queryServices)
-
-  def removeCollector(collector: Collector): Unit = collectors.remove(collector)
-
-  def removeWebService(webService: WebService): Unit = collectors.remove(webService)
-
-  def removeQueryService(queryService: QueryService): Unit = collectors.remove(queryService)
-
-  private def addComponent[E <: ZipkinComponent](zipkinComponent: E, componentList: mutable.Buffer[E]): E = {
-    componentList.add(zipkinComponent)
-    zipkinComponent
-  }
 
   def clear(): Unit = {
     collectors.clear()

@@ -1,6 +1,6 @@
 package net.elodina.mesos.zipkin
 
-package object zipkin {
+package object components {
 
   sealed trait State
 

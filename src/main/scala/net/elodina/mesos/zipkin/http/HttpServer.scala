@@ -12,15 +12,27 @@ import org.eclipse.jetty.util.thread.QueuedThreadPool
 import scala.util.parsing.json.JSONObject
 
 object HttpServer {
-  var jar: File = null
+
+  val jarMask: String = "mesos-zipkin.*\\.jar"
+  val collectorMask: String = "zipkin-collector-service.*\\.jar"
+  val queryMask: String = "zipkin-query-service.*\\.jar"
+  val webMask: String = "zipkin-web-service.*\\.jar"
+  val collectorConfigMask = "collector-*\\.scala"
+  val queryConfigMask = "query-*\\.scala"
+
+  private[zipkin] var jar: File = null
+  private[zipkin] var collector: File = null
+  private[zipkin] var query: File = null
+  private[zipkin] var web: File = null
+  private[zipkin] var collectorConfigFiles: List[File] = Nil
+  private[zipkin] var queryConfigFiles: List[File] = Nil
 
   val logger = Logger.getLogger(HttpServer.getClass)
   var server: Server = null
 
   def start(resolveDeps: Boolean = true) {
     if (server != null) throw new IllegalStateException("started")
-    // TODO: here we should check for whether dependencies are in place
-
+    if (resolveDeps) this.resolveDeps()
     val threadPool = new QueuedThreadPool(Runtime.getRuntime.availableProcessors() * 16)
     threadPool.setName("Jetty")
 
@@ -40,6 +52,22 @@ object HttpServer {
 
     if (Config.apiPort == 0) Config.replaceApiPort(connector.getLocalPort)
     logger.info("started on port " + connector.getLocalPort)
+  }
+
+  private def resolveDeps() {
+    for (file <- new File(".").listFiles()) {
+      if (file.getName.matches(jarMask)) jar = file
+      if (file.getName.matches(collectorMask)) collector = file
+      if (file.getName.matches(queryMask)) query = file
+      if (file.getName.matches(webMask)) web = file
+      if (file.getName.matches(collectorConfigMask)) collectorConfigFiles = file :: collectorConfigFiles
+      if (file.getName.matches(queryConfigMask)) queryConfigFiles = file :: queryConfigFiles
+    }
+
+    if (jar == null) throw new IllegalStateException(jarMask + " not found in current dir")
+    if (collector == null) throw new IllegalStateException(collectorMask + " not found in current dir")
+    if (query == null) throw new IllegalStateException(queryMask + " not found in current dir")
+    if (web == null) throw new IllegalStateException(webMask + " not found in current dir")
   }
 
   def stop() {

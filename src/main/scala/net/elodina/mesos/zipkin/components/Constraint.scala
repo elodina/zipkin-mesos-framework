@@ -15,7 +15,7 @@
  * limitations under the License.
  */
 
-package net.elodina.mesos.zipkin.zipkin
+package net.elodina.mesos.zipkin.components
 
 import java.util.regex.{Pattern, PatternSyntaxException}
 

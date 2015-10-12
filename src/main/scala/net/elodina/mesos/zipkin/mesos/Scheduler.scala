@@ -8,7 +8,7 @@ import net.elodina.mesos.zipkin.Config
 import net.elodina.mesos.zipkin.http.HttpServer
 import net.elodina.mesos.zipkin.storage.Cluster
 import net.elodina.mesos.zipkin.utils.Str
-import net.elodina.mesos.zipkin.zipkin.{Reconciling, ZipkinComponent}
+import net.elodina.mesos.zipkin.components._
 import com.google.protobuf.ByteString
 import org.apache.log4j._
 import org.apache.mesos.Protos._
@@ -72,6 +72,15 @@ object Scheduler extends org.apache.mesos.Scheduler {
 
   def error(driver: SchedulerDriver, message: String): Unit = {
     logger.info("[error] " + message)
+  }
+
+  private[zipkin] def stopInstance[E <: ZipkinComponent](component: E) = {
+    if (component.state == Staging || component.state == Running)
+      driver.killTask(TaskID.newBuilder().setValue(component.task.id).build())
+
+    component.state = Added
+    component.task = null
+    component
   }
 
   def start() {
@@ -148,13 +157,13 @@ object Scheduler extends org.apache.mesos.Scheduler {
       reconcileTime = now
 
       if (reconciles > RECONCILE_MAX_TRIES) {
-        killReconcilingTasks(cluster.getCollectors)
-        killReconcilingTasks(cluster.getQueryServices)
-        killReconcilingTasks(cluster.getWebServices)
+        killReconcilingTasks(cluster.collectors.toList)
+        killReconcilingTasks(cluster.queryServices.toList)
+        killReconcilingTasks(cluster.webServices.toList)
       } else {
-        val statuses = setTasksToReconciling(cluster.getCollectors, force) ++
-          setTasksToReconciling(cluster.getQueryServices, force) ++
-          setTasksToReconciling(cluster.getWebServices, force)
+        val statuses = setTasksToReconciling(cluster.collectors.toList, force) ++
+          setTasksToReconciling(cluster.queryServices.toList, force) ++
+          setTasksToReconciling(cluster.webServices.toList, force)
 
         if (force || statuses.nonEmpty) driver.reconcileTasks(if (force) Collections.emptyList() else statuses)
       }
@@ -170,7 +179,7 @@ object Scheduler extends org.apache.mesos.Scheduler {
   }
 
   private[zipkin] def setTasksToReconciling[E <: ZipkinComponent](componentList: List[E], force: Boolean): List[TaskStatus] = {
-    componentList.filter(x => x.task != null && (force || x.isReconciling)).map {zc =>
+    componentList.filter(x => x.task != null && (force || x.isReconciling)).map { zc =>
       zc.state = Reconciling
       logger.info(s"Reconciling $reconciles/$RECONCILE_MAX_TRIES state of ${zc.componentName} ${zc.id}, task ${zc.task.id}")
       TaskStatus.newBuilder()
