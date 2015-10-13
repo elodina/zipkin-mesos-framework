@@ -7,18 +7,43 @@ import net.elodina.mesos.zipkin.mesos.Scheduler
 import net.elodina.mesos.zipkin.utils.Util
 import net.elodina.mesos.zipkin.components._
 import org.apache.log4j.Logger
-import play.api.libs.json.Json
+import play.api.libs.json._
 import net.elodina.mesos.zipkin.utils.{Range => URange}
 
 import scala.collection.mutable
 import scala.concurrent.duration.Duration
 import scala.collection.JavaConversions._
 import scala.util.Try
+import play.api.libs.json.Json._
 
-case class ApiResponse[E <: ZipkinComponent](success: Boolean, message: String, value: Option[List[E]] = None)
+
+case class ApiResponse[E <: ZipkinComponent](success: Boolean = true, message: String = "", value: Option[List[E]] = None)
 
 object ApiResponse {
-  implicit val format = Json.format[ApiResponse]
+
+  implicit def apiResponseReads[E <: ZipkinComponent](implicit fmt: Reads[E]): Reads[ApiResponse[E]] = new Reads[ApiResponse[E]] {
+    def reads(json: JsValue): ApiResponse[E] = {
+      ApiResponse((json \ "success").as[Boolean],
+        (json \ "message").as[String],
+        json \ "value" match {
+          case JsArray(v) => Some(v.map(t => fromJson(t)(fmt) match {
+            case value: JsSuccess[E] => value.get
+            case e: JsError => throw new IllegalArgumentException(s"invalid Zipkin instance value supplied: ${JsError.toFlatJson(e).toString()}")
+          }).toList)
+          case _ => None
+        })
+    }
+  }
+
+  implicit def apiResponseWrites[E <: ZipkinComponent](implicit fmt: Writes[E]): Writes[ApiResponse[E]] = new Writes[ApiResponse[E]] {
+    def writes(ar: ApiResponse[E]) = {
+      var res = Seq(
+      "success" -> JsBoolean(ar.success),
+      "message" -> JsString(ar.message))
+      ar.value.foreach(x => res = res :+ ("value" -> JsArray(x.map(toJson(_)))))
+      JsObject(res)
+    }
+  }
 }
 
 class Servlet extends HttpServlet {
@@ -91,7 +116,7 @@ class Servlet extends HttpServlet {
                                          instantiateComponent: String => E,
                                          uriPath: String) {
     val uri = fetchPathPart(request, s"/api/$uriPath")
-    if (uri == "list") handleList(request, response, fetchCollection)
+    if (uri == "list") handleList(request, response, fetchCollection, uriPath)
     else if (uri == "add") handleAdd(request, response, fetchCollection, instantiateComponent, uriPath)
     else if (uri == "start") handleStart(request, response, fetchCollection, uriPath)
     else if (uri == "stop") handleStop(request, response, fetchCollection, uriPath)
@@ -218,7 +243,16 @@ class Servlet extends HttpServlet {
   }
 
   private def handleList[E <: ZipkinComponent](request: HttpServletRequest, response: HttpServletResponse,
-                                               fetchCollection: => mutable.Buffer[E]) {
-    response.getWriter.println(Json.toJson(ApiResponse(success = true, "", Some(fetchCollection.toList))))
+                                               fetchCollection: => mutable.Buffer[E], componentName: String) {
+    Option(request.getParameter("id")).map(Util.expandIds(_, fetchCollection)) match {
+      case None => response.getWriter.println(Json.toJson(ApiResponse(success = true, "", Some(fetchCollection.toList))))
+      case Some(ids) =>
+        ids.filter(id => !fetchCollection.exists(id == _.id)) match {
+          case Nil => response.getWriter.println(Json.toJson(ApiResponse(success = true, "",
+            Some(fetchCollection.filter(zc => ids.contains(zc.id)).toList))))
+          case nonExistentIds => response.getWriter.println(Json.toJson(ApiResponse(success = false,
+            s"Zipkin $componentName instance(s) ${nonExistentIds.mkString(",")} do not exist", None)))
+        }
+    }
   }
 }

@@ -13,12 +13,6 @@ object SchedulerCli {
   def handle(args: Array[String], help: Boolean = false): Unit = {
     val parser = newParser()
 
-    def configureCLParser(optionParser: OptionParser, optionsMap: Map[String, String]) = {
-      optionsMap.foreach { it =>
-        optionParser.accepts(it._1, it._2).withRequiredArg().ofType(classOf[String])
-      }
-    }
-
     parser.accepts("debug", "Debug mode. Default - " + Config.debug)
       .withRequiredArg().ofType(classOf[java.lang.Boolean])
 
@@ -65,7 +59,7 @@ object SchedulerCli {
       case e: OptionException =>
         parser.printHelpOn(out)
         printLine()
-        throw new Error(e.getMessage)
+        throw new CliError(e.getMessage)
     }
 
     fetchConfigFile(options, configArg).foreach { configFile =>
@@ -82,7 +76,7 @@ object SchedulerCli {
     Option(options.valueOf(configArg)) match {
       case Some(configArgValue) =>
         val configFile = new File(configArgValue)
-        if (configFile.exists()) throw new Error(s"config-file $configFile not found")
+        if (configFile.exists()) throw new CliError(s"config-file $configFile not found")
         Some(configFile)
       case None if Config.DEFAULT_FILE.exists() =>
         Some(Config.DEFAULT_FILE)
@@ -93,15 +87,13 @@ object SchedulerCli {
   private def loadConfigFromArgs(options: OptionSet): Unit = {
     val provideOption = "Provide either cli option or config default value"
 
-    def readCLProperty[E](propName: String, options: OptionSet) = {Option(options.valueOf(propName).asInstanceOf[E])}
-
     readCLProperty[java.lang.Boolean]("debug", options).foreach(Config.debug = _)
 
     readCLProperty[String]("storage", options).foreach(Config.storage = _)
 
     readCLProperty[String]("master", options).foreach(x => Config.master = Some(x))
 
-    if (Config.master.isEmpty) throw new Error(s"Undefined master. $provideOption")
+    if (Config.master.isEmpty) throw new CliError(s"Undefined master. $provideOption")
 
     readCLProperty[String]("secret", options).foreach(x => Config.secret = Some(x))
 
@@ -117,29 +109,29 @@ object SchedulerCli {
       ft => try {
         Config.frameworkTimeout = new Period(ft)
       } catch {
-        case e: IllegalArgumentException => throw new Error("Invalid framework-timeout")
+        case e: IllegalArgumentException => throw new CliError("Invalid framework-timeout")
       }
     }
 
     readCLProperty[String]("api", options).foreach(x => Config.api = Some(x))
 
-    if (Config.api.isEmpty) throw new Error(s"Undefined api. $provideOption")
+    if (Config.api.isEmpty) throw new CliError(s"Undefined api. $provideOption")
 
     readCLProperty[String]("bind-address", options).foreach {
       ba => try {
         Config.bindAddress = Some(new BindAddress(ba))
       } catch {
-        case e: IllegalArgumentException => throw new Error("Invalid bind-address")
+        case e: IllegalArgumentException => throw new CliError("Invalid bind-address")
       }
     }
 
     readCLProperty[String]("zk", options).foreach(x => Config.zk = Some(x))
 
-    if (Config.zk.isEmpty) throw new Error(s"Undefined zk. $provideOption")
+    if (Config.zk.isEmpty) throw new CliError(s"Undefined zk. $provideOption")
 
     readCLProperty[String]("jre", options).foreach(x => Config.jre = Some(new File(x)))
 
-    Config.jre.foreach(jre => if (!jre.exists()) throw new Error("JRE file doesn't exists"))
+    Config.jre.foreach(jre => if (!jre.exists()) throw new CliError("JRE file doesn't exists"))
 
     readCLProperty[String]("log", options).foreach(x => Config.log = Some(new File(x)))
 

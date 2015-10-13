@@ -110,27 +110,7 @@ object Util {
     result.toList
   }
 
-  def formatMap(map: util.Map[String, _ <: Any], entrySep: Char = ',', valueSep: Char = '='): String = {
-    def escape(s: String): String = {
-      var result = ""
-
-      for (c <- s.toCharArray) {
-        if (c == entrySep || c == valueSep || c == '\\') result += "\\"
-        result += c
-      }
-
-      result
-    }
-
-    var s = ""
-    for ((k, v) <- map) {
-      if (!s.isEmpty) s += entrySep
-      s += escape(k)
-      if (v != null) s += valueSep + escape("" + v)
-    }
-
-    s
-  }
+  def formatMap(map: collection.Map[String, _ <: Any], entrySep: Char = ',', valueSep: Char = '='): String = formatList(map.toList, entrySep, valueSep)
 
   def parseMap(s: String, entrySep: Char = ',', valueSep: Char = '=', nullValues: Boolean = true): Map[String, String] = parseList(s, entrySep, valueSep, nullValues).toMap
 

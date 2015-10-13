@@ -24,7 +24,7 @@ object MainCli {
     if (args.length == 0) {
       handleHelp()
       printLine()
-      throw new Error("command required")
+      throw new CliError("command required")
     }
 
     val cmd = args(0)
@@ -44,15 +44,15 @@ object MainCli {
     // rest of cmds require <subCmd>
     if (cmdArgs.length < 1) {
       handleHelp(Some(cmd)); printLine()
-      throw new Error("command required")
+      throw new CliError("command required")
     }
 
     val subCmd = cmdArgs(0)
     val subCmdArgs = cmdArgs.slice(1, args.length)
 
     cmd match {
-      // Whatever commands should go here
-      case _ => throw new Error("unsupported command " + cmd)
+      case "collector" | "query" | "web" => ZipkinComponentCli.handle(cmd, Some(subCmd), subCmdArgs)
+      case _ => throw new CliError("unsupported command " + cmd)
     }
   }
 
@@ -67,10 +67,12 @@ object MainCli {
       case Some("help") =>
         printLine("Print general or command-specific help\nUsage: help [cmd [cmd]]")
       case Some("scheduler") =>
-        if (!SchedulerCli.isEnabled) throw new Error(s"unsupported command $cmd")
+        if (!SchedulerCli.isEnabled) throw new CliError(s"unsupported command $cmd")
         SchedulerCli.handle(null, help = true)
+      case Some("collector") | Some("query") | Some("web") =>
+        ZipkinComponentCli.handle(cmd.get, subCmd, null, help = true)
       case _ =>
-        throw new Error(s"unsupported command $cmd")
+        throw new CliError(s"unsupported command $cmd")
     }
   }
 
@@ -78,5 +80,8 @@ object MainCli {
     printLine("Commands:")
     printLine("help [cmd [cmd]] - print general or command-specific help", 1)
     if (SchedulerCli.isEnabled) printLine("scheduler        - start scheduler", 1)
+    printLine("collector        - Zipkin collector management commands", 1)
+    printLine("query            - Zipkin query management commands", 1)
+    printLine("web              - Zipkin wen management commands", 1)
   }
 }
