@@ -41,7 +41,66 @@ object Scheduler extends org.apache.mesos.Scheduler {
 
   def resourceOffers(driver: SchedulerDriver, offers: util.List[Offer]): Unit = {
     logger.info("[resourceOffers]\n" + Str.offers(offers))
-    //TODO: tryAcceptOffer
+
+    onResourceOffers(offers.toList)
+  }
+
+  private def onResourceOffers(offers: List[Offer]) {
+    offers.foreach { offer =>
+      acceptOffer(offer).foreach { declineReason =>
+        driver.declineOffer(offer.getId)
+        logger.info(s"Declined offer:\n  $declineReason")
+      }
+    }
+
+    reconcileTasks()
+    Scheduler.cluster.save()
+  }
+
+  private[zipkin] def acceptOffer(offer: Offer): Option[String] = {
+    acceptOfferForComponent(offer, cluster.collectors.toList, "collector")
+    acceptOfferForComponent(offer, cluster.queryServices.toList, "query")
+    acceptOfferForComponent(offer, cluster.webServices.toList, "web")
+  }
+
+  private[zipkin] def acceptOfferForComponent[E <: ZipkinComponent](offer: Offer, components: List[E], componentName: String): Option[String] = {
+    components.filter(_.state == Stopped) match {
+      case Nil => Some(s"all $componentName instances are running")
+      case nonEmptyComponents =>
+        val reason = nonEmptyComponents.flatMap { component =>
+          component.matches(offer, otherAttributes = otherTasksAttributes) match {
+            case Some(declineReason) => Some(s"$componentName instance ${component.id}: $declineReason")
+            case None =>
+              launchTask(component, offer)
+              return None
+          }
+        }.mkString(", ")
+
+        if (reason.isEmpty) None else Some(reason)
+    }
+  }
+
+  private[zipkin] def otherTasksAttributes(name: String): List[String] = {
+
+    cluster.fetchAllComponents.filter(_.task != null).flatMap { zc =>
+      if (name == "hostname") {
+        zc.task.attributes.get(name)
+      } else {
+        Option(zc.config.hostname)
+      }
+    }.toList
+  }
+
+  private def launchTask[E <: ZipkinComponent](component: E, offer: Offer) {
+    val task = component.createTask(offer)
+    val taskId = task.getTaskId.getValue
+    val attributes = offer.getAttributesList.toList.filter(_.hasText).map(attr => attr.getName -> attr.getText.getValue).toMap
+
+    component.task = Task(taskId, task.getSlaveId.getValue, task.getExecutor.getExecutorId.getValue, attributes)
+    component.state = Staging
+    driver.launchTasks(util.Arrays.asList(offer.getId), util.Arrays.asList(task), Filters.newBuilder().setRefuseSeconds(1).build)
+
+    logger.info(s"Starting Zipkin ${component.componentName} instance ${component.id}: launching task $taskId for offer ${offer.getId.getValue}")
   }
 
   def offerRescinded(driver: SchedulerDriver, id: OfferID): Unit = {

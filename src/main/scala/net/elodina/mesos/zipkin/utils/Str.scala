@@ -6,6 +6,7 @@ import java.util.Date
 import org.apache.mesos.Protos
 import org.apache.mesos.Protos._
 import collection.JavaConverters._
+import scala.collection.JavaConversions._
 
 object Str {
   def dateTime(date: Date): String = {
@@ -89,11 +90,11 @@ object Str {
       if (resource.hasScalar)
         s += "%.2f".format(resource.getScalar.getValue)
 
-      if (resource.hasRanges)
+      if (resource.hasRanges) {
         for (range: org.apache.mesos.Protos.Value.Range <- resource.getRanges.getRangeList)
           s += "[" + range.getBegin + ".." + range.getEnd + "]"
+      }
     }
-
     s
   }
 

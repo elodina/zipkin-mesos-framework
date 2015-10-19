@@ -43,6 +43,10 @@ case class Cluster(_collectors: List[Collector] = Nil,
     }
   }
 
+  def fetchAllComponents = {
+    collectors ++ queryServices ++ webServices
+  }
+
   def isReconciling:Boolean = {
     collectors.exists(_.isReconciling) || queryServices.exists(_.isReconciling) || webServices.exists(_.isReconciling)
   }

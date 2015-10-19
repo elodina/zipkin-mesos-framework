@@ -5,13 +5,14 @@ import java.net.{URL, HttpURLConnection, URLEncoder}
 import java.util
 import java.util.Properties
 import net.elodina.mesos.zipkin.utils.Util
-import play.api.libs.json.{Json, JsValue}
+import play.api.libs.json.{JsValue, Json}
 
 import scala.collection.JavaConversions._
 
 import joptsimple.{BuiltinHelpFormatter, OptionParser, OptionException, OptionSet}
 
 import scala.io.Source
+import scala.reflect.ClassTag
 
 package object cli {
 
@@ -27,9 +28,9 @@ package object cli {
     configureTypedCLParser[String](optionParser, optionsMap)
   }
 
-  private[cli] def configureTypedCLParser[E](optionParser: OptionParser, optionsMap: Map[String, String]) = {
+  private[cli] def configureTypedCLParser[E: ClassTag](optionParser: OptionParser, optionsMap: Map[String, String])(implicit ct: ClassTag[E]) = {
     optionsMap.foreach { it =>
-      optionParser.accepts(it._1, it._2).withRequiredArg().ofType(classOf[E])
+      optionParser.accepts(it._1, it._2).withRequiredArg().ofType(ct.runtimeClass)
     }
   }
 

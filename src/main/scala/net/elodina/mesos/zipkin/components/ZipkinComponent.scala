@@ -1,19 +1,26 @@
 package net.elodina.mesos.zipkin.components
 
 import java.util.{UUID, Date}
-import net.elodina.mesos.zipkin.utils.{Util, Period, Range}
-import net.elodina.mesos.zipkin.components.ZipkinComponent.Task
-import org.apache.mesos.Protos.Offer
-import play.api.libs.json._
+import com.google.protobuf.ByteString
+import net.elodina.mesos.zipkin.Config
+import net.elodina.mesos.zipkin.http.HttpServer
+import net.elodina.mesos.zipkin.utils.{Util, Range}
+import org.apache.mesos.Protos
+import org.apache.mesos.Protos._
 import play.api.libs.functional.syntax._
-
+import play.api.libs.json.{JsValue, Json, Writes, _}
+import play.api.libs.json.Writes._
+import play.api.libs.json.Reads._
 import scala.collection.{mutable, Map}
+import scala.collection.immutable.{Map => IMap}
 import scala.collection.JavaConversions._
 import scala.concurrent.duration.Duration
 
 case class TaskConfig(var cpus: Double = 1, var mem: Double = 256, var ports: List[Range] = Nil,
-                      var envVariables: Map[String, String] = Map(), var flags: Map[String, String] = Map(),
-                      var configFile: Option[String] = None)
+                      var envVariables: IMap[String, String] = IMap(),
+                      var flags: IMap[String, String] = IMap(),
+                      var configFile: Option[String] = None,
+                      var hostname: String = "")
 
 object TaskConfig {
 
@@ -21,9 +28,10 @@ object TaskConfig {
       (__ \ 'cpu).read[Double] and
       (__ \ 'mem).read[Double] and
       (__ \ 'ports).read[String].map(Range.parseRanges) and
-      (__ \ 'envVariables).read[Map[String, String]] and
-      (__ \ 'flags).read[Map[String, String]] and
-      (__ \ 'configFile).readNullable[String])(TaskConfig.apply _)
+      (__ \ 'envVariables).read[IMap[String, String]] and
+      (__ \ 'flags).read[IMap[String, String]] and
+      (__ \ 'configFile).readNullable[String] and
+      (__ \ 'hostname).read[String])(TaskConfig.apply _)
 
   implicit val writer = new Writes[TaskConfig] {
     def writes(tc: TaskConfig): JsValue = {
@@ -31,9 +39,10 @@ object TaskConfig {
         "cpu" -> tc.cpus,
         "mem" -> tc.mem,
         "ports" -> tc.ports.mkString(","),
-        "envVariables" -> tc.envVariables.toMap,
-        "flags" -> tc.flags.toMap,
-        "configFile" -> tc.configFile
+        "envVariables" -> tc.envVariables,
+        "flags" -> tc.flags,
+        "configFile" -> tc.configFile,
+        "hostname" -> tc.hostname
       )
     }
   }
@@ -46,9 +55,56 @@ sealed abstract class ZipkinComponent(val id: String = "0") {
   @volatile var task: Task = null
   var config = setDefaultConfig()
 
-  abstract def setDefaultConfig(): TaskConfig
+  def setDefaultConfig(): TaskConfig
 
-  abstract def componentName: String
+  def componentName: String
+
+  def configurePort(port: Long): Unit
+
+  def createTask(offer: Offer): TaskInfo = {
+    val port = getPort(offer).getOrElse(throw new IllegalStateException("No suitable port"))
+
+    val name = s"zipkin-$componentName-${this.id}"
+    val id = nextTaskId
+    this.config.hostname = offer.getHostname
+    configurePort(port)
+
+    val taskId = TaskID.newBuilder().setValue(id).build
+    TaskInfo.newBuilder().setName(name).setTaskId(taskId).setSlaveId(offer.getSlaveId)
+      .setExecutor(newExecutor(this.id))
+      .setData(ByteString.copyFromUtf8(Json.stringify(Json.toJson(this.config))))
+      .addResources(Protos.Resource.newBuilder().setName("cpus").setType(Protos.Value.Type.SCALAR).setScalar(Protos.Value.Scalar.newBuilder().setValue(this.config.cpus)))
+      .addResources(Protos.Resource.newBuilder().setName("mem").setType(Protos.Value.Type.SCALAR).setScalar(Protos.Value.Scalar.newBuilder().setValue(this.config.mem)))
+      .addResources(Protos.Resource.newBuilder().setName("ports").setType(Protos.Value.Type.RANGES).setRanges(
+        Protos.Value.Ranges.newBuilder().addRange(Protos.Value.Range.newBuilder().setBegin(port).setEnd(port))
+      )).build
+  }
+
+  private[zipkin] def newExecutor(id: String): ExecutorInfo = {
+    val java = "$(find jdk* -maxdepth 0 -type d)" // find non-recursively a directory starting with "jdk"
+    val cmd = s"export PATH=$$MESOS_DIRECTORY/$java/bin:$$PATH && java -cp ${HttpServer.jar.getName}${if (Config.debug) " -Ddebug" else ""} net.elodina.mesos.zipkin.mesos.Executor"
+
+    val commandBuilder = CommandInfo.newBuilder()
+    commandBuilder
+      .addUris(CommandInfo.URI.newBuilder().setValue(s"${Config.api}/collector/" + HttpServer.collector.getName))
+      .addUris(CommandInfo.URI.newBuilder().setValue(s"${Config.api}/query/" + HttpServer.query.getName))
+      .addUris(CommandInfo.URI.newBuilder().setValue(s"${Config.api}/web/" + HttpServer.web.getName))
+      .setValue(cmd)
+
+    HttpServer.collectorConfigFiles.foreach { f =>
+      commandBuilder.addUris(CommandInfo.URI.newBuilder().setValue(s"${Config.api}/collector-conf/" + f.getName))
+    }
+
+    HttpServer.queryConfigFiles.foreach { f =>
+      commandBuilder.addUris(CommandInfo.URI.newBuilder().setValue(s"${Config.api}/query-conf/" + f.getName))
+    }
+
+    ExecutorInfo.newBuilder()
+      .setExecutorId(ExecutorID.newBuilder().setValue(s"$componentName-$id"))
+      .setCommand(commandBuilder)
+      .setName(s"zipkin-$componentName-$id")
+      .build
+  }
 
   def nextTaskId: String = s"zipkin-$componentName-$id-${UUID.randomUUID()}"
 
@@ -111,15 +167,14 @@ sealed abstract class ZipkinComponent(val id: String = "0") {
     parts(2)
   }
 }
+case class Task(id: String, slaveId: String, executorId: String, attributes: IMap[String, String])
+
+object Task {
+
+  implicit val fmt = Json.format[Task]
+}
 
 object ZipkinComponent {
-
-  case class Task(id: String, slaveId: String, executorId: String, attributes: Map[String, String])
-
-  object Task {
-    implicit val writer = Json.writes[Task]
-    implicit val reader = Json.reads[Task]
-  }
 
   def writeJson[E <: ZipkinComponent](zc: E): JsValue = {
     Json.obj(
@@ -162,17 +217,24 @@ case class Collector(override val id: String = "0") extends ZipkinComponent(id) 
   override def componentName = "collector"
 
   override def setDefaultConfig(): TaskConfig = {
-    TaskConfig(1, 256, Nil, Map(), Map(), Some("collector-dev.scala"))
+    TaskConfig(1, 256, Nil, IMap(), IMap(), Some("collector-dev.scala"))
+  }
+
+  override def configurePort(port: Long): Unit = {
+    this.config.envVariables = this.config.envVariables + ("COLLECTOR_PORT" -> port.toString)
   }
 }
-
 
 case class QueryService(override val id: String = "0") extends ZipkinComponent(id) {
 
   override def componentName = "query"
 
   override def setDefaultConfig(): TaskConfig = {
-    TaskConfig(1, 256, Nil, Map(), Map(), Some("query-dev.scala"))
+    TaskConfig(1, 256, Nil, IMap(), IMap(), Some("query-dev.scala"))
+  }
+
+  override def configurePort(port: Long): Unit = {
+    this.config.envVariables = this.config.envVariables + ("QUERY_PORT" -> port.toString)
   }
 }
 
@@ -182,6 +244,10 @@ case class WebService(override val id: String = "0") extends ZipkinComponent(id)
 
   override def setDefaultConfig(): TaskConfig = {
     TaskConfig(1, 256)
+  }
+
+  override def configurePort(port: Long): Unit = {
+    this.config.flags = this.config.flags + ("zipkin.web.port" -> port.toString)
   }
 }
 

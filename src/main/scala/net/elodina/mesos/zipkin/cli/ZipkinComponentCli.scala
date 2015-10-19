@@ -5,25 +5,19 @@ import java.io.PrintStream
 import joptsimple.OptionParser
 import net.elodina.mesos.zipkin.components._
 import net.elodina.mesos.zipkin.http.ApiResponse
-import net.elodina.mesos.zipkin.components.ZipkinComponent._
 import net.elodina.mesos.zipkin.utils.Util
 import play.api.libs.json.JsValue
 
 object ZipkinComponentCli {
 
   def handle(cmd: String, subCmd: Option[String] = None, cmdArgs: Array[String] = Array(), help: Boolean = false) {
-    val jsonDeserializer = cmd match {
-      case "collector" => (x: JsValue) => x.as[ApiResponse[Collector]]
-      case "query" => (x: JsValue) => x.as[ApiResponse[QueryService]]
-      case "web" => (x: JsValue) => x.as[ApiResponse[WebService]]
-    }
 
     if (help || subCmd.isEmpty) {
       handleHelp(cmd)
       return
     }
 
-    def containsIdExpr = cmdArgs.length > 0 && !cmdArgs(0).startsWith("-")
+    val containsIdExpr = cmdArgs.length > 0 && !cmdArgs(0).startsWith("-")
 
     if (!containsIdExpr && subCmd.get != "list") {
       handleHelp(cmd)
@@ -31,21 +25,31 @@ object ZipkinComponentCli {
       throw new CliError("argument required")
     }
 
-    val idExpr = {
-      cmdArgs(0)
-    }
-    val refinedArgs = {
-      cmdArgs.slice(1, cmdArgs.length)
-    }
+    val idExpr: Option[String] = if (containsIdExpr) Some(cmdArgs(0)) else None
+    val refinedArgs = if (containsIdExpr) cmdArgs.slice(1, cmdArgs.length) else Array[String]()
 
-    subCmd.get match {
-      case "list" => handleList(cmd, jsonDeserializer, Some(idExpr))
-      case "add" | "config" => handleAddConfig(cmd, jsonDeserializer, Some(idExpr), help = false,
-        add = subCmd.get == "add", refinedArgs)
-      case "remove" => handleRemove(cmd, jsonDeserializer, Some(idExpr))
-      case "start" => handleStart(cmd, jsonDeserializer, Some(idExpr), help = false, refinedArgs)
-      case "stop" => handleStop(cmd, jsonDeserializer, Some(idExpr))
-      case _ => throw new CliError(s"unsupported Zipkin $cmd command subCmd.get")
+    cmd match {
+      case "collector" =>
+        handleComponentCommand(cmd, subCmd.get, idExpr, refinedArgs, help,
+        {(x: JsValue) => x.as[ApiResponse[Collector]]})
+      case "query" => handleComponentCommand(cmd, subCmd.get, idExpr, refinedArgs, help,
+      {(x: JsValue) => x.as[ApiResponse[QueryService]]})
+      case "web" => handleComponentCommand(cmd, subCmd.get, idExpr, refinedArgs, help,
+      {(x: JsValue) => x.as[ApiResponse[WebService]]})
+    }
+  }
+
+  private def handleComponentCommand[E <: ZipkinComponent](cmd: String, subCmd: String, expr: Option[String] = None,
+                                                           args: Array[String] = Array[String](), help: Boolean = false,
+                                                           parseResponse: JsValue => ApiResponse[E]): Unit = {
+    subCmd match {
+      case "list" => handleList(cmd, Some(parseResponse), expr)
+      case "add" | "config" => handleAddConfig(cmd, Some(parseResponse), expr, help = false,
+        add = subCmd == "add", args)
+      case "remove" => handleRemove(cmd, Some(parseResponse), expr)
+      case "start" => handleStart(cmd, Some(parseResponse), expr, help = false, args)
+      case "stop" => handleStop(cmd, Some(parseResponse), expr)
+      case _ => throw new CliError(s"unsupported Zipkin $cmd command $subCmd")
     }
   }
 
@@ -72,7 +76,7 @@ object ZipkinComponentCli {
     }
   }
 
-  private def handleAddConfig[E <: ZipkinComponent](componentName: String, deserializeJson: JsValue => ApiResponse[E] = ApiResponse(),
+  private def handleAddConfig[E <: ZipkinComponent](componentName: String, deserializeJson: Option[JsValue => ApiResponse[E]] = None,
                                             expr: Option[String] = None, help: Boolean = false, add: Boolean = true,
                                             args: Array[String] = Array()): Unit = {
     val parser = newParser()
@@ -104,35 +108,35 @@ object ZipkinComponentCli {
     readCLProperty[String]("ports", options).foreach(x => params += ("ports" -> x))
     readCLProperty[String]("configFile", options).foreach(x => params += ("configFile" -> x))
 
-    val response = deserializeJson(sendRequest(s"/$componentName/$cmd", params.toMap))
+    val response = deserializeJson.get(sendRequest(s"/$componentName/$cmd", params.toMap))
 
     processApiResponse(response)
   }
 
-  private def handleRemove[E <: ZipkinComponent](componentName: String, deserializeJson: JsValue => ApiResponse[E] = ApiResponse(),
+  private def handleRemove[E <: ZipkinComponent](componentName: String, deserializeJson: Option[JsValue => ApiResponse[E]] = None,
                                          expr: Option[String] = None, help: Boolean = false): Unit = {
     if (help) {
       printHelp(componentName, "remove")
       return
     }
 
-    val response = deserializeJson(sendRequest(s"/$componentName/remove",
+    val response = deserializeJson.get(sendRequest(s"/$componentName/remove",
       expr.map(ids => Map("id" -> ids)).getOrElse(throw new IllegalArgumentException("id expr not specified"))))
     processApiResponse(response)
   }
 
-  private def handleStop[E <: ZipkinComponent](componentName: String, deserializeJson: JsValue => ApiResponse[E] = ApiResponse(),
+  private def handleStop[E <: ZipkinComponent](componentName: String, deserializeJson: Option[JsValue => ApiResponse[E]] = None,
                                        expr: Option[String] = None, help: Boolean = false): Unit = {
     if (help) {
       printHelp(componentName, "stop")
       return
     }
-    val response = deserializeJson(sendRequest(s"/$componentName/stop",
+    val response = deserializeJson.get(sendRequest(s"/$componentName/stop",
       expr.map(ids => Map("id" -> ids)).getOrElse(throw new IllegalArgumentException("id expr not specified"))))
     processApiResponse(response)
   }
 
-  private def handleStart[E <: ZipkinComponent](componentName: String, deserializeJson: JsValue => ApiResponse[E] = ApiResponse(),
+  private def handleStart[E <: ZipkinComponent](componentName: String, deserializeJson: Option[JsValue => ApiResponse[E]] = None,
                                         expr: Option[String] = None, help: Boolean = false, args: Array[String] = Array()): Unit = {
     val parser = newParser()
 
@@ -147,18 +151,18 @@ object ZipkinComponentCli {
     val params = collection.mutable.Map[String, String]("id" -> expr.getOrElse(throw new IllegalArgumentException("id expr not specified")))
     readCLProperty[String]("timeout", parseOptions(parser, args)).foreach(x => params += ("timeout" -> x.toString))
 
-    val response = deserializeJson(sendRequest(s"/$componentName/start", params.toMap))
+    val response = deserializeJson.get(sendRequest(s"/$componentName/start", params.toMap))
     processApiResponse(response)
   }
 
-  private def handleList[E <: ZipkinComponent](componentName: String, deserializeJson: JsValue => ApiResponse[E] = ApiResponse(),
+  private def handleList[E <: ZipkinComponent](componentName: String, deserializeJson: Option[JsValue => ApiResponse[E]] = None,
                                        expr: Option[String] = None, help: Boolean = false): Unit = {
     if (help) {
       printHelp(componentName, "list")
       return
     }
 
-    val response = deserializeJson(sendRequest(s"/$componentName/list", expr.map(ids => Map("id" -> ids)).getOrElse(Map())))
+    val response = deserializeJson.get(sendRequest(s"/$componentName/list", expr.map(ids => Map("id" -> ids)).getOrElse(Map())))
     response.value.foreach(_.foreach(printZipkinComponent(_)))
   }
 

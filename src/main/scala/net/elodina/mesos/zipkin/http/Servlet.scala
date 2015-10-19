@@ -22,8 +22,8 @@ case class ApiResponse[E <: ZipkinComponent](success: Boolean = true, message: S
 object ApiResponse {
 
   implicit def apiResponseReads[E <: ZipkinComponent](implicit fmt: Reads[E]): Reads[ApiResponse[E]] = new Reads[ApiResponse[E]] {
-    def reads(json: JsValue): ApiResponse[E] = {
-      ApiResponse((json \ "success").as[Boolean],
+    def reads(json: JsValue): JsResult[ApiResponse[E]] = {
+      JsSuccess(ApiResponse((json \ "success").as[Boolean],
         (json \ "message").as[String],
         json \ "value" match {
           case JsArray(v) => Some(v.map(t => fromJson(t)(fmt) match {
@@ -31,7 +31,7 @@ object ApiResponse {
             case e: JsError => throw new IllegalArgumentException(s"invalid Zipkin instance value supplied: ${JsError.toFlatJson(e).toString()}")
           }).toList)
           case _ => None
-        })
+        }))
     }
   }
 
@@ -104,9 +104,12 @@ class Servlet extends HttpServlet {
     response.setContentType("application/json; charset=utf-8")
 
     val uri = fetchPathPart(request, "/api")
-    if (uri.startsWith("collector")) handleZipkin(request, response, { Scheduler.cluster.collectors }, {Collector(_)}, "collector")
-    else if (uri.startsWith("query")) handleZipkin(request, response, { Scheduler.cluster.queryServices }, { QueryService(_) }, "query")
-    else if (uri.startsWith("web")) handleZipkin(request, response, { Scheduler.cluster.webServices }, { WebService(_) }, "web")
+    if (uri.startsWith("collector")) handleZipkin(request, response, { Scheduler.cluster.collectors }, {Collector(_)},
+    "collector", {(x: Boolean, y: String, z: Option[List[Collector]]) => Json.toJson(ApiResponse[Collector](x, y, z) )})
+    else if (uri.startsWith("query")) handleZipkin(request, response, { Scheduler.cluster.queryServices }, { QueryService(_) },
+    "query", {(x: Boolean, y: String, z: Option[List[QueryService]]) => Json.toJson(ApiResponse[QueryService](x, y, z) )})
+    else if (uri.startsWith("web")) handleZipkin(request, response, { Scheduler.cluster.webServices }, { WebService(_) },
+    "web", {(x: Boolean, y: String, z: Option[List[WebService]]) => Json.toJson(ApiResponse[WebService](x, y, z) )})
     else response.sendError(404)
   }
 
@@ -114,19 +117,21 @@ class Servlet extends HttpServlet {
                                          response: HttpServletResponse,
                                          fetchCollection: => collection.mutable.Buffer[E],
                                          instantiateComponent: String => E,
-                                         uriPath: String) {
+                                         uriPath: String,
+                                         createApiResponse: (Boolean, String, Option[List[E]]) => JsValue) {
     val uri = fetchPathPart(request, s"/api/$uriPath")
-    if (uri == "list") handleList(request, response, fetchCollection, uriPath)
-    else if (uri == "add") handleAdd(request, response, fetchCollection, instantiateComponent, uriPath)
-    else if (uri == "start") handleStart(request, response, fetchCollection, uriPath)
-    else if (uri == "stop") handleStop(request, response, fetchCollection, uriPath)
-    else if (uri == "remove") handleRemove(request, response, fetchCollection, uriPath)
-    else if (uri == "config") handleConfig(request, response, fetchCollection, uriPath)
+    if (uri == "list") handleList(request, response, fetchCollection, uriPath, createApiResponse)
+    else if (uri == "add") handleAdd(request, response, fetchCollection, instantiateComponent, uriPath, createApiResponse)
+    else if (uri == "start") handleStart(request, response, fetchCollection, uriPath, createApiResponse)
+    else if (uri == "stop") handleStop(request, response, fetchCollection, uriPath, createApiResponse)
+    else if (uri == "remove") handleRemove(request, response, fetchCollection, uriPath, createApiResponse)
+    else if (uri == "config") handleConfig(request, response, fetchCollection, uriPath, createApiResponse)
     else response.sendError(404)
   }
 
   private def handleAdd[E <: ZipkinComponent](request: HttpServletRequest, response: HttpServletResponse,
-                                              fetchCollection: => mutable.Buffer[E], instantiateComponent: String => E, componentName: String) {
+                                              fetchCollection: => mutable.Buffer[E], instantiateComponent: String => E,
+                                              componentName: String, createApiResponse: (Boolean, String, Option[List[E]]) => JsValue) {
     val idExpr = request.getParameter("id")
     val ids = Util.expandIds(idExpr, fetchCollection)
     val cpus = Option(request.getParameter("cpu"))
@@ -138,7 +143,7 @@ class Servlet extends HttpServlet {
     val configFile = Option(request.getParameter("configfile"))
     val existing = ids.filter(id => fetchCollection.exists(_.id == id))
     if (existing.nonEmpty) {
-      response.getWriter.println(Json.toJson(ApiResponse(success = false, s"Zipkin $componentName instance(s) ${existing.mkString(",")} already exist", None)))
+      response.getWriter.println(createApiResponse(false, s"Zipkin $componentName instance(s) ${existing.mkString(",")} already exist", None))
     } else {
       val components = ids.map { id =>
         val component = instantiateComponent(id)
@@ -153,13 +158,14 @@ class Servlet extends HttpServlet {
         component
       }
       Scheduler.cluster.save()
-      response.getWriter.println(Json.toJson(ApiResponse(success = true, s"Added servers $idExpr", Some(components))))
+      response.getWriter.println(createApiResponse(true, s"Added servers $idExpr", Some(components)))
     }
   }
 
   private def handleStart[E <: ZipkinComponent](request: HttpServletRequest, response: HttpServletResponse,
-                                                fetchCollection: => mutable.Buffer[E], componentName: String) {
-    processExistingInstances(request, response, fetchCollection, componentName, { (ids, idExpr) =>
+                                                fetchCollection: => mutable.Buffer[E], componentName: String,
+                                                createApiResponse: (Boolean, String, Option[List[E]]) => JsValue) {
+    processExistingInstances(request, response, fetchCollection, componentName, createApiResponse, { (ids, idExpr) =>
       val timeout = Duration(Option(request.getParameter("timeout")).getOrElse("60s"))
       val components = ids.flatMap { id =>
         fetchCollection.find(_.id == id).map { component =>
@@ -173,40 +179,43 @@ class Servlet extends HttpServlet {
 
       if (timeout.toMillis > 0) {
         val ok = fetchCollection.forall(_.waitFor(Running, timeout))
-        if (ok) response.getWriter.println(Json.toJson(ApiResponse(success = true, s"Started $componentName instance(s) $idExpr", Some(components))))
-        else response.getWriter.println(Json.toJson(ApiResponse(success = false, s"Start $componentName instance(s) $idExpr timed out after $timeout", None)))
+        if (ok) response.getWriter.println(createApiResponse(true, s"Started $componentName instance(s) $idExpr", Some(components)))
+        else response.getWriter.println(createApiResponse(false, s"Start $componentName instance(s) $idExpr timed out after $timeout", None))
       }
     })
   }
 
   private def handleStop[E <: ZipkinComponent](request: HttpServletRequest, response: HttpServletResponse,
-                                               fetchCollection: => mutable.Buffer[E], componentName: String) {
-    processExistingInstances(request, response, fetchCollection, componentName, { (ids, idExpr) =>
+                                               fetchCollection: => mutable.Buffer[E], componentName: String,
+                                               createApiResponse: (Boolean, String, Option[List[E]]) => JsValue) {
+    processExistingInstances(request, response, fetchCollection, componentName, createApiResponse, { (ids, idExpr) =>
       val components = ids.flatMap { id =>
         fetchCollection.find(_.id == id).map(Scheduler.stopInstance)
       }
       Scheduler.cluster.save()
-      response.getWriter.println(Json.toJson(ApiResponse(success = true, s"Stopped $componentName instance(s) $idExpr", Some(components))))
+      response.getWriter.println(createApiResponse(true, s"Stopped $componentName instance(s) $idExpr", Some(components)))
     })
   }
 
   private def handleRemove[E <: ZipkinComponent](request: HttpServletRequest, response: HttpServletResponse,
-                                                 fetchCollection: => mutable.Buffer[E], componentName: String) {
-    processExistingInstances(request, response, fetchCollection, componentName, { (ids, idExpr) =>
+                                                 fetchCollection: => mutable.Buffer[E], componentName: String,
+                                                 createApiResponse: (Boolean, String, Option[List[E]]) => JsValue) {
+    processExistingInstances(request, response, fetchCollection, componentName, createApiResponse, { (ids, idExpr) =>
       val components = ids.flatMap { id =>
-        fetchCollection.find(_.id == id).map {
-          Scheduler.stopInstance(_)
-          fetchCollection -= _
+        fetchCollection.find(_.id == id).map { zc =>
+          fetchCollection -= zc
+          Scheduler.stopInstance(zc)
         }
       }
       Scheduler.cluster.save()
-      response.getWriter.println(Json.toJson(ApiResponse(success = true, s"Removed $componentName instance(s) $idExpr", Some(components))))
+      response.getWriter.println(createApiResponse(true, s"Removed $componentName instance(s) $idExpr", Some(components)))
     })
   }
 
   private def handleConfig[E <: ZipkinComponent](request: HttpServletRequest, response: HttpServletResponse,
-                                                 fetchCollection: => mutable.Buffer[E], componentName: String) {
-    processExistingInstances(request, response, fetchCollection, componentName, { (ids, idExpr) =>
+                                                 fetchCollection: => mutable.Buffer[E], componentName: String,
+                                                 createApiResponse: (Boolean, String, Option[List[E]]) => JsValue) {
+    processExistingInstances(request, response, fetchCollection, componentName, createApiResponse, { (ids, idExpr) =>
       val components = ids.flatMap { id =>
         fetchCollection.find(_.id == id).map { component =>
           request.getParameterMap.toMap.foreach {
@@ -225,7 +234,7 @@ class Servlet extends HttpServlet {
       }
 
       Scheduler.cluster.save()
-      response.getWriter.println(Json.toJson(ApiResponse(success = true, s"Updated configuration for Zipkin $componentName instance(s) $idExpr", Some(components))))
+      response.getWriter.println(createApiResponse(true, s"Updated configuration for Zipkin $componentName instance(s) $idExpr", Some(components)))
     })
   }
 
@@ -233,25 +242,27 @@ class Servlet extends HttpServlet {
                                                              response: HttpServletResponse,
                                                              fetchCollection: => mutable.Buffer[E],
                                                              componentName: String,
+                                                             createApiResponse: (Boolean, String, Option[List[E]]) => JsValue,
                                                              action: (List[String], String) => Unit) {
     val idExpr = request.getParameter("id")
     val ids = Util.expandIds(idExpr, fetchCollection)
     val missing = ids.filter(id => !fetchCollection.exists(id == _.id))
-    if (missing.nonEmpty) response.getWriter.println(Json.toJson(ApiResponse(success = false,
-      s"Zipkin $componentName instance(s) ${missing.mkString(",")} do not exist", None)))
+    if (missing.nonEmpty) response.getWriter.println(ApiResponse(success = false,
+      s"Zipkin $componentName instance(s) ${missing.mkString(",")} do not exist", None))
     else action(ids, idExpr)
   }
 
   private def handleList[E <: ZipkinComponent](request: HttpServletRequest, response: HttpServletResponse,
-                                               fetchCollection: => mutable.Buffer[E], componentName: String) {
+                                               fetchCollection: => mutable.Buffer[E], componentName: String,
+                                               createApiResponse: (Boolean, String, Option[List[E]]) => JsValue) {
     Option(request.getParameter("id")).map(Util.expandIds(_, fetchCollection)) match {
-      case None => response.getWriter.println(Json.toJson(ApiResponse(success = true, "", Some(fetchCollection.toList))))
+      case None => response.getWriter.println(createApiResponse(true, "", Some(fetchCollection.toList)))
       case Some(ids) =>
         ids.filter(id => !fetchCollection.exists(id == _.id)) match {
-          case Nil => response.getWriter.println(Json.toJson(ApiResponse(success = true, "",
-            Some(fetchCollection.filter(zc => ids.contains(zc.id)).toList))))
-          case nonExistentIds => response.getWriter.println(Json.toJson(ApiResponse(success = false,
-            s"Zipkin $componentName instance(s) ${nonExistentIds.mkString(",")} do not exist", None)))
+          case Nil => response.getWriter.println(createApiResponse(true, "",
+            Some(fetchCollection.filter(zc => ids.contains(zc.id)).toList)))
+          case nonExistentIds => response.getWriter.println(createApiResponse(false,
+            s"Zipkin $componentName instance(s) ${nonExistentIds.mkString(",")} do not exist", None))
         }
     }
   }
