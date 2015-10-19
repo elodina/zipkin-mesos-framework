@@ -14,6 +14,7 @@ import org.apache.log4j._
 import org.apache.mesos.Protos._
 import org.apache.mesos.{MesosSchedulerDriver, SchedulerDriver}
 import scala.collection.JavaConversions._
+import scala.collection.mutable.ListBuffer
 import scala.concurrent.duration._
 import scala.language.postfixOps
 
@@ -47,9 +48,13 @@ object Scheduler extends org.apache.mesos.Scheduler {
 
   private def onResourceOffers(offers: List[Offer]) {
     offers.foreach { offer =>
-      acceptOffer(offer).foreach { declineReason =>
+      val declinedReasons = acceptOffer(offer)
+
+      if (declinedReasons.size == 3) {
         driver.declineOffer(offer.getId)
-        logger.info(s"Declined offer:\n  $declineReason")
+        logger.info(s"Declined offer:\n${declinedReasons.mkString("\n")}")
+      } else if (declinedReasons.nonEmpty) {
+        logger.info(s"Some components have declined an offer:\n${declinedReasons.mkString("\n")}")
       }
     }
 
@@ -57,10 +62,21 @@ object Scheduler extends org.apache.mesos.Scheduler {
     Scheduler.cluster.save()
   }
 
-  private[zipkin] def acceptOffer(offer: Offer): Option[String] = {
-    acceptOfferForComponent(offer, cluster.collectors.toList, "collector")
-    acceptOfferForComponent(offer, cluster.queryServices.toList, "query")
-    acceptOfferForComponent(offer, cluster.webServices.toList, "web")
+  private[zipkin] def acceptOffer(offer: Offer): List[String] = {
+    val tryAccept: List[() => Option[String]] = List({ () =>
+      acceptOfferForComponent(offer, cluster.collectors.toList, "collector")
+    }, { () =>
+      acceptOfferForComponent(offer, cluster.queryServices.toList, "query")
+    }, { () =>
+      acceptOfferForComponent(offer, cluster.webServices.toList, "web")
+    })
+    val declineReasons = tryAccept.foldLeft(ListBuffer[String]()) { (list, elem) =>
+        elem() match {
+          case Some(declineReason) => list.append(declineReason); list
+          case None => return list.toList
+        }
+    }
+    declineReasons.toList
   }
 
   private[zipkin] def acceptOfferForComponent[E <: ZipkinComponent](offer: Offer, components: List[E], componentName: String): Option[String] = {

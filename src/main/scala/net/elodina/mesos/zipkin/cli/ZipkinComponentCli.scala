@@ -13,7 +13,7 @@ object ZipkinComponentCli {
   def handle(cmd: String, subCmd: Option[String] = None, cmdArgs: Array[String] = Array(), help: Boolean = false) {
 
     if (help || subCmd.isEmpty) {
-      handleHelp(cmd)
+      handleHelp(cmd, subCmd)
       return
     }
 
@@ -108,6 +108,7 @@ object ZipkinComponentCli {
     readCLProperty[String]("ports", options).foreach(x => params += ("ports" -> x))
     readCLProperty[String]("configFile", options).foreach(x => params += ("configFile" -> x))
 
+    //println(s"got params: $params")
     val response = deserializeJson.get(sendRequest(s"/$componentName/$cmd", params.toMap))
 
     processApiResponse(response)
@@ -188,16 +189,16 @@ object ZipkinComponentCli {
 
   private def printTaskConfig(config: TaskConfig, indent: Int = 0) {
     printLine("config:", indent)
-    printLine(s"cpu: ${config.cpus}", indent)
-    printLine(s"mem: ${config.mem}", indent)
+    printLine(s"cpu: ${config.cpus}", indent + 1)
+    printLine(s"mem: ${config.mem}", indent + 1)
     val ports = config.ports match {
       case Nil => "auto"
       case _ => config.ports.mkString(",")
     }
-    printLine(s"port: $ports", indent)
-    printLine(s"envVariables: ${Util.formatMap(config.envVariables)}")
-    printLine(s"flags: ${Util.formatMap(config.flags)}")
-    config.configFile.foreach(cf => printLine(s"configFile: $cf"))
+    printLine(s"port: $ports", indent + 1)
+    printLine(s"envVariables: ${Util.formatMap(config.envVariables)}", indent + 1)
+    printLine(s"flags: ${Util.formatMap(config.flags)}", indent + 1)
+    config.configFile.foreach(cf => printLine(s"configFile: $cf", indent + 1))
   }
 
   private def printIdExprExamples(out: PrintStream): Unit = {

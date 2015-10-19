@@ -129,7 +129,7 @@ package object cli {
     }
 
     val qs: String = queryString(params)
-    val url: String = Config.getApi + (if (Config.getApi.endsWith("/")) "" else "/") + "api" + uri + "?" + qs
+    val url: String = api + (if (api.endsWith("/")) "" else "/") + "api" + uri + "?" + qs
 
     val connection: HttpURLConnection = new URL(url).openConnection().asInstanceOf[HttpURLConnection]
     var response: String = null

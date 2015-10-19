@@ -10,7 +10,7 @@ object Executor extends org.apache.mesos.Executor {
   private val logger = Logger.getLogger(Executor.getClass)
 
   def main(args: Array[String]) {
-    //initLogging()
+    initLogging()
 
     val driver = new MesosExecutorDriver(Executor)
     val status = if (driver.run eq Status.DRIVER_STOPPED) 0 else 1

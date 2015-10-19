@@ -31,7 +31,8 @@ object MainCli {
     var cmdArgs = args.slice(1, args.length)
 
     if (cmd == "help") {
-      handleHelp(if (args.length > 0) Some(args(0)) else None, if (args.length > 1) Some(args(1)) else None); return
+      handleHelp(if (args.length > 1) Some(args(1)) else None, if (args.length > 2) Some(args(2)) else None)
+      return
     }
 
     if (cmd == "scheduler" && SchedulerCli.isEnabled) {
@@ -82,6 +83,6 @@ object MainCli {
     if (SchedulerCli.isEnabled) printLine("scheduler        - start scheduler", 1)
     printLine("collector        - Zipkin collector management commands", 1)
     printLine("query            - Zipkin query management commands", 1)
-    printLine("web              - Zipkin wen management commands", 1)
+    printLine("web              - Zipkin web management commands", 1)
   }
 }
