@@ -61,6 +61,10 @@ sealed abstract class ZipkinComponent(val id: String = "0") {
 
   def configurePort(port: Long): Unit
 
+  def fetchPort(): Option[String]
+
+  def url: String = s"http://${config.hostname}:${fetchPort()}"
+
   def createTask(offer: Offer): TaskInfo = {
     val port = getPort(offer).getOrElse(throw new IllegalStateException("No suitable port"))
 
@@ -71,7 +75,7 @@ sealed abstract class ZipkinComponent(val id: String = "0") {
 
     val taskId = TaskID.newBuilder().setValue(id).build
     TaskInfo.newBuilder().setName(name).setTaskId(taskId).setSlaveId(offer.getSlaveId)
-      .setExecutor(newExecutor(this.id))
+      .setExecutor(newExecutor(s"$componentName-${this.id}"))
       .setData(ByteString.copyFromUtf8(Json.stringify(Json.toJson(this.config))))
       .addResources(Protos.Resource.newBuilder().setName("cpus").setType(Protos.Value.Type.SCALAR).setScalar(Protos.Value.Scalar.newBuilder().setValue(this.config.cpus)))
       .addResources(Protos.Resource.newBuilder().setName("mem").setType(Protos.Value.Type.SCALAR).setScalar(Protos.Value.Scalar.newBuilder().setValue(this.config.mem)))
@@ -223,6 +227,8 @@ case class Collector(override val id: String = "0") extends ZipkinComponent(id) 
   override def configurePort(port: Long): Unit = {
     this.config.envVariables = this.config.envVariables + ("COLLECTOR_PORT" -> port.toString)
   }
+
+  override def fetchPort() = this.config.envVariables.get("COLLECTOR_PORT")
 }
 
 case class QueryService(override val id: String = "0") extends ZipkinComponent(id) {
@@ -236,6 +242,8 @@ case class QueryService(override val id: String = "0") extends ZipkinComponent(i
   override def configurePort(port: Long): Unit = {
     this.config.envVariables = this.config.envVariables + ("QUERY_PORT" -> port.toString)
   }
+
+  override def fetchPort() = this.config.envVariables.get("QUERY_PORT")
 }
 
 case class WebService(override val id: String = "0") extends ZipkinComponent(id) {
@@ -249,6 +257,8 @@ case class WebService(override val id: String = "0") extends ZipkinComponent(id)
   override def configurePort(port: Long): Unit = {
     this.config.flags = this.config.flags + ("zipkin.web.port" -> port.toString)
   }
+
+  override def fetchPort() = this.config.flags.get("zipkin.web.port")
 }
 
 object Collector {

@@ -181,6 +181,9 @@ object ZipkinComponentCli {
     printLine("instance:", indent)
     printLine(s"id: ${component.id}", indent + 1)
     printLine(s"state: ${component.state}", indent + 1)
+    if (!component.config.hostname.isEmpty && component.fetchPort().isDefined) {
+      printLine(s"endpoint: ${component.url}", indent + 1)
+    }
     if (component.constraints.nonEmpty)
       printLine(s"constraints: ${Util.formatConstraints(component.constraints)}", indent + 1)
     printTaskConfig(component.config, indent + 1)
