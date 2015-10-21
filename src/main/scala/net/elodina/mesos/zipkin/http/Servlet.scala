@@ -74,8 +74,8 @@ class Servlet extends HttpServlet {
     else if (uri.startsWith("/collector/")) downloadFile(HttpServer.collector, response)
     else if (uri.startsWith("/query/")) downloadFile(HttpServer.query, response)
     else if (uri.startsWith("/web/")) downloadFile(HttpServer.web, response)
-    else if (uri.startsWith("/collector-conf/")) downloadConfigFile(uri, response)
-    else if (uri.startsWith("/query-conf/")) downloadConfigFile(uri, response)
+    else if (uri.startsWith("/collector-conf/")) downloadConfigFile(uri, response, HttpServer.collectorConfigFiles)
+    else if (uri.startsWith("/query-conf/")) downloadConfigFile(uri, response, HttpServer.queryConfigFiles)
     else if (uri.startsWith("/api")) handleApi(request, response)
     else response.sendError(404)
   }
@@ -87,9 +87,9 @@ class Servlet extends HttpServlet {
     Util.copyAndClose(new FileInputStream(file), response.getOutputStream)
   }
 
-  def downloadConfigFile(uri: String, response: HttpServletResponse) {
+  def downloadConfigFile(uri: String, response: HttpServletResponse, configFiles: List[File]) {
     val confFileName = uri.split("/").last
-    HttpServer.collectorConfigFiles.find(_.getName == confFileName) match {
+    configFiles.find(_.getName == confFileName) match {
       case Some(file) => downloadFile(file, response)
       case None => response.sendError(404)
     }

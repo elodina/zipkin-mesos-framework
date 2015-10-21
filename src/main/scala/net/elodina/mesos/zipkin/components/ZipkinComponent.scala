@@ -63,7 +63,7 @@ sealed abstract class ZipkinComponent(val id: String = "0") {
 
   def fetchPort(): Option[String]
 
-  def url: String = s"http://${config.hostname}:${fetchPort()}"
+  def url: String = s"http://${config.hostname}:${fetchPort().getOrElse("")}"
 
   def createTask(offer: Offer): TaskInfo = {
     val port = getPort(offer).getOrElse(throw new IllegalStateException("No suitable port"))
@@ -85,22 +85,22 @@ sealed abstract class ZipkinComponent(val id: String = "0") {
   }
 
   private[zipkin] def newExecutor(id: String): ExecutorInfo = {
-    val java = "$(find jdk* -maxdepth 0 -type d)" // find non-recursively a directory starting with "jdk"
-    val cmd = s"export PATH=$$MESOS_DIRECTORY/$java/bin:$$PATH && java -cp ${HttpServer.jar.getName}${if (Config.debug) " -Ddebug" else ""} net.elodina.mesos.zipkin.mesos.Executor"
+    val cmd = s"java -cp ${HttpServer.jar.getName}${if (Config.debug) " -Ddebug" else ""} net.elodina.mesos.zipkin.mesos.Executor"
 
     val commandBuilder = CommandInfo.newBuilder()
     commandBuilder
-      .addUris(CommandInfo.URI.newBuilder().setValue(s"${Config.api}/collector/" + HttpServer.collector.getName))
-      .addUris(CommandInfo.URI.newBuilder().setValue(s"${Config.api}/query/" + HttpServer.query.getName))
-      .addUris(CommandInfo.URI.newBuilder().setValue(s"${Config.api}/web/" + HttpServer.web.getName))
+      .addUris(CommandInfo.URI.newBuilder().setValue(s"${Config.getApi}/collector/" + HttpServer.collector.getName))
+      .addUris(CommandInfo.URI.newBuilder().setValue(s"${Config.getApi}/query/" + HttpServer.query.getName))
+      .addUris(CommandInfo.URI.newBuilder().setValue(s"${Config.getApi}/web/" + HttpServer.web.getName))
+      .addUris(CommandInfo.URI.newBuilder().setValue(s"${Config.getApi}/jar/" + HttpServer.jar.getName))
       .setValue(cmd)
 
     HttpServer.collectorConfigFiles.foreach { f =>
-      commandBuilder.addUris(CommandInfo.URI.newBuilder().setValue(s"${Config.api}/collector-conf/" + f.getName))
+      commandBuilder.addUris(CommandInfo.URI.newBuilder().setValue(s"${Config.getApi}/collector-conf/" + f.getName))
     }
 
     HttpServer.queryConfigFiles.foreach { f =>
-      commandBuilder.addUris(CommandInfo.URI.newBuilder().setValue(s"${Config.api}/query-conf/" + f.getName))
+      commandBuilder.addUris(CommandInfo.URI.newBuilder().setValue(s"${Config.getApi}/query-conf/" + f.getName))
     }
 
     ExecutorInfo.newBuilder()
@@ -164,13 +164,8 @@ sealed abstract class ZipkinComponent(val id: String = "0") {
 
     this.state == state
   }
-
-  def idFromTaskId(taskId: String): String = {
-    val parts: Array[String] = taskId.split("-")
-    if (parts.length < 3) throw new IllegalArgumentException(taskId)
-    parts(2)
-  }
 }
+
 case class Task(id: String, slaveId: String, executorId: String, attributes: IMap[String, String])
 
 object Task {
@@ -179,6 +174,18 @@ object Task {
 }
 
 object ZipkinComponent {
+
+  def idFromTaskId(taskId: String): String = {
+    val parts: Array[String] = taskId.split("-")
+    if (parts.length < 3) throw new IllegalArgumentException(taskId)
+    parts(2)
+  }
+
+  def getComponentFromTaskId(taskId: String): String = {
+    val parts: Array[String] = taskId.split("-")
+    if (parts.length < 3) throw new IllegalArgumentException(s"Illegal task id specified: $taskId")
+    parts(1)
+  }
 
   def writeJson[E <: ZipkinComponent](zc: E): JsValue = {
     Json.obj(
@@ -206,6 +213,7 @@ object ZipkinComponent {
     zc.config.ports = config.ports
     zc.config.flags = config.flags
     zc.config.envVariables = config.envVariables
+    zc.config.hostname = config.hostname
     zc
   }
 

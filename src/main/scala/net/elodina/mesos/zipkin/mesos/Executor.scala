@@ -1,13 +1,19 @@
 package net.elodina.mesos.zipkin.mesos
 
-import _root_.net.elodina.mesos.zipkin.utils.Str
+import java.io.{PrintWriter, StringWriter}
+
+import net.elodina.mesos.zipkin.components.{ZipkinComponentServer, TaskConfig}
+import net.elodina.mesos.zipkin.utils.Str
 import org.apache.log4j._
 import org.apache.mesos.{ExecutorDriver, MesosExecutorDriver}
 import org.apache.mesos.Protos._
+import play.api.libs.json.Json
 
 object Executor extends org.apache.mesos.Executor {
 
   private val logger = Logger.getLogger(Executor.getClass)
+
+  private val zipkinServer = new ZipkinComponentServer
 
   def main(args: Array[String]) {
     initLogging()
@@ -20,7 +26,7 @@ object Executor extends org.apache.mesos.Executor {
 
   override def shutdown(driver: ExecutorDriver): Unit = {
     logger.info("[shutdown]")
-    //stopExecutor()
+    stopExecutor()
   }
 
   override def disconnected(driver: ExecutorDriver): Unit = {
@@ -29,7 +35,7 @@ object Executor extends org.apache.mesos.Executor {
 
   override def killTask(driver: ExecutorDriver, taskId: TaskID): Unit = {
     logger.info("[killTask] " + taskId.getValue)
-    //stopExecutor()
+    stopExecutor()
   }
 
   override def reregistered(driver: ExecutorDriver, slaveInfo: SlaveInfo): Unit = {
@@ -51,7 +57,29 @@ object Executor extends org.apache.mesos.Executor {
   override def launchTask(driver: ExecutorDriver, task: TaskInfo): Unit = {
     logger.info("[launchTask] " + Str.task(task))
 
-    // actually launch the task
+    new Thread {
+      override def run() {
+        setName("Zipkin")
+
+        try {
+          val taskConfig = Json.parse(task.getData.toStringUtf8).as[TaskConfig]
+          zipkinServer.start(taskConfig, task.getTaskId.getValue)
+          driver.sendStatusUpdate(TaskStatus.newBuilder().setTaskId(task.getTaskId).setState(TaskState.TASK_RUNNING).build)
+          zipkinServer.await().foreach(exitCode => if (exitCode != 0) {
+            logger.error(s"Zipkin component process finished with exitCode $exitCode")
+          })
+          // TODO: consider sending TASK_FAILED on non-zero exit code
+          driver.sendStatusUpdate(TaskStatus.newBuilder().setTaskId(task.getTaskId).setState(TaskState.TASK_FINISHED).build)
+        } catch {
+          case t: Throwable =>
+            logger.error("", t)
+            sendTaskFailed(driver, task, t)
+        } finally {
+          stopExecutor()
+        }
+      }
+    }.start()
+
   }
 
   private def initLogging() {
@@ -65,5 +93,29 @@ object Executor extends org.apache.mesos.Executor {
 
     val layout = new PatternLayout("%d [%t] %-5p %c %x - %m%n")
     root.addAppender(new ConsoleAppender(layout))
+  }
+
+  private def sendTaskFailed(driver: ExecutorDriver, task: TaskInfo, t: Throwable) {
+    val stackTrace = new StringWriter()
+    t.printStackTrace(new PrintWriter(stackTrace, true))
+
+    driver.sendStatusUpdate(TaskStatus.newBuilder().setTaskId(task.getTaskId).setState(TaskState.TASK_FAILED)
+      .setMessage("" + stackTrace).build)
+  }
+
+  private[zipkin] def stopExecutor(async: Boolean = false) {
+    def triggerStop() {
+      if (zipkinServer.isStarted) zipkinServer.stop()
+      //TODO stop driver here?
+    }
+
+    if (async) {
+      new Thread() {
+        override def run() {
+          setName("ExecutorStopper")
+          triggerStop()
+        }
+      }
+    } else triggerStop()
   }
 }

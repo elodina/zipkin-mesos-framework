@@ -17,8 +17,8 @@ object HttpServer {
   val collectorMask: String = "zipkin-collector-service.*\\.jar"
   val queryMask: String = "zipkin-query-service.*\\.jar"
   val webMask: String = "zipkin-web.*\\.jar"
-  val collectorConfigMask = "collector-*\\.scala"
-  val queryConfigMask = "query-*\\.scala"
+  val collectorConfigMask = "collector-.*\\.scala"
+  val queryConfigMask = "query-.*\\.scala"
 
   private[zipkin] var jar: File = null
   private[zipkin] var collector: File = null

@@ -125,7 +125,8 @@ object Scheduler extends org.apache.mesos.Scheduler {
 
   def statusUpdate(driver: SchedulerDriver, status: TaskStatus): Unit = {
     logger.info("[statusUpdate] " + Str.taskStatus(status))
-    //TODO: onChangeStatus(status)
+
+    onServerStatus(driver, status)
   }
 
   def frameworkMessage(driver: SchedulerDriver, executorId: ExecutorID, slaveId: SlaveID, data: Array[Byte]): Unit = {
@@ -147,6 +148,53 @@ object Scheduler extends org.apache.mesos.Scheduler {
 
   def error(driver: SchedulerDriver, message: String): Unit = {
     logger.info("[error] " + message)
+  }
+
+  private def onServerStatus(driver: SchedulerDriver, status: TaskStatus) {
+    val taskId = status.getTaskId.getValue
+    val components = ZipkinComponent.getComponentFromTaskId(taskId) match {
+      case "collector" => cluster.collectors
+      case "query" => cluster.queryServices
+      case "web" => cluster.webServices
+    }
+    val zipkinComponent = components.find(ZipkinComponent.idFromTaskId(taskId) == _.id)
+
+    status.getState match {
+      case TaskState.TASK_RUNNING =>
+        new Thread {
+          override def run() {
+            onServerStarted(zipkinComponent, driver, status)
+          }
+        }.start()
+      case TaskState.TASK_LOST | TaskState.TASK_FAILED | TaskState.TASK_ERROR =>
+        onServerFailed(zipkinComponent, status)
+      case TaskState.TASK_FINISHED | TaskState.TASK_KILLED => logger.info(s"Task $taskId has finished")
+      case _ => logger.warn("Got unexpected task state: " + status.getState)
+    }
+
+    Scheduler.cluster.save()
+  }
+
+  private def onServerStarted[E <: ZipkinComponent](serverOpt: Option[E], driver: SchedulerDriver, status: TaskStatus) {
+    serverOpt match {
+      case Some(server) =>
+        this.synchronized {
+          if (server.state != Running) {
+            logger.info(s"Set zipkin ${server.componentName} ${server.id} as running")
+            server.state = Running
+          }
+        }
+      case None =>
+        logger.info(s"Got ${status.getState} for unknown/stopped server, killing task ${status.getTaskId}")
+        driver.killTask(status.getTaskId)
+    }
+  }
+
+  private def onServerFailed[E <: ZipkinComponent](serverOpt: Option[E], status: TaskStatus) {
+    serverOpt match {
+      case Some(server) => server.state = Stopped
+      case None => logger.info(s"Got ${status.getState} for unknown/stopped server with task ${status.getTaskId}")
+    }
   }
 
   private[zipkin] def stopInstance[E <: ZipkinComponent](component: E) = {
