@@ -87,7 +87,7 @@ object ZipkinComponentCli {
     configureCLParser(parser, Map(
       "flags" -> "App flags (zipkin.web.query.dest=master:31001)",
       "env" -> "Environment variables (KAFKA_ZOOKEPER=master:2181)",
-      "ports" -> "port or range (31092, 31090..31100). Default - auto",
+      "port" -> "port or range (31092, 31090..31100). Default - auto",
       "configFile" -> "Configuration file to launch an instance",
       "constraints" -> "Constraints (hostname=like:master,rack=like:1.*). See below."
     ))
@@ -106,11 +106,10 @@ object ZipkinComponentCli {
     readCLProperty[java.lang.Double]("mem", options).foreach(x => params += ("mem" -> x.toString))
     readCLProperty[String]("flags", options).foreach(x => params += ("flags" -> x))
     readCLProperty[String]("env", options).foreach(x => params += ("env" -> x))
-    readCLProperty[String]("ports", options).foreach(x => params += ("ports" -> x))
+    readCLProperty[String]("port", options).foreach(x => params += ("port" -> x))
     readCLProperty[String]("configFile", options).foreach(x => params += ("configFile" -> x))
     readCLProperty[String]("constraints", options).foreach(x => params += ("constraints" -> x))
 
-    //println(s"got params: $params")
     val response = deserializeJson.get(sendRequest(s"/$componentName/$cmd", params.toMap))
 
     processApiResponse(response)

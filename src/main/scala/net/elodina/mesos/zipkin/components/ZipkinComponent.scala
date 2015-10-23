@@ -218,6 +218,7 @@ object ZipkinComponent {
     zc.config.flags = config.flags
     zc.config.env = config.env
     zc.config.hostname = config.hostname
+    zc.config.configFile = config.configFile
     zc
   }
 

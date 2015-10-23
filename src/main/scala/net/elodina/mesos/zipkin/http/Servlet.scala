@@ -120,6 +120,7 @@ class Servlet extends HttpServlet {
                                          instantiateComponent: String => E,
                                          uriPath: String,
                                          createApiResponse: (Boolean, String, Option[List[E]]) => JsValue) {
+    logger.info(s"Got parameters: \n${request.getParameterMap.map {pm => s"${pm._1}: ${pm._2.headOption.getOrElse("")}" }.mkString("\n")}")
     val uri = fetchPathPart(request, s"/api/$uriPath")
     if (uri == "list") handleList(request, response, fetchCollection, uriPath, createApiResponse)
     else if (uri == "add") handleAdd(request, response, fetchCollection, instantiateComponent, uriPath, createApiResponse)
@@ -141,9 +142,8 @@ class Servlet extends HttpServlet {
     val ports = Option(request.getParameter("port"))
     val flags = Option(request.getParameter("flags"))
     val env = Option(request.getParameter("env"))
-    val configFile = Option(request.getParameter("configfile"))
+    val configFile = Option(request.getParameter("configFile"))
     val existing = ids.filter(id => fetchCollection.exists(_.id == id))
-    println(s"Got parameters: \n${request.getParameterMap.foreach{ case (k, v) => println(s"  $k:$v")}}")
     if (existing.nonEmpty) {
       response.getWriter.println(createApiResponse(false, s"Zipkin $componentName instance(s) ${existing.mkString(",")} already exist", None))
     } else {
