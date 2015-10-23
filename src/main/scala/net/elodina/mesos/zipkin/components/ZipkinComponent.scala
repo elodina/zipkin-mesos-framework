@@ -17,7 +17,7 @@ import scala.collection.JavaConversions._
 import scala.concurrent.duration.Duration
 
 case class TaskConfig(var cpus: Double = 1, var mem: Double = 256, var ports: List[Range] = Nil,
-                      var envVariables: IMap[String, String] = IMap(),
+                      var env: IMap[String, String] = IMap(),
                       var flags: IMap[String, String] = IMap(),
                       var configFile: Option[String] = None,
                       var hostname: String = "")
@@ -28,7 +28,7 @@ object TaskConfig {
       (__ \ 'cpu).read[Double] and
       (__ \ 'mem).read[Double] and
       (__ \ 'ports).read[String].map(Range.parseRanges) and
-      (__ \ 'envVariables).read[IMap[String, String]] and
+      (__ \ 'env).read[IMap[String, String]] and
       (__ \ 'flags).read[IMap[String, String]] and
       (__ \ 'configFile).readNullable[String] and
       (__ \ 'hostname).read[String])(TaskConfig.apply _)
@@ -39,7 +39,7 @@ object TaskConfig {
         "cpu" -> tc.cpus,
         "mem" -> tc.mem,
         "ports" -> tc.ports.mkString(","),
-        "envVariables" -> tc.envVariables,
+        "env" -> tc.env,
         "flags" -> tc.flags,
         "configFile" -> tc.configFile,
         "hostname" -> tc.hostname
@@ -62,6 +62,9 @@ sealed abstract class ZipkinComponent(val id: String = "0") {
   def configurePort(port: Long): Unit
 
   def fetchPort(): Option[String]
+
+  /* Whatever should happen with task configuration after it is configured by user should go here. */
+  def postConfig(): Unit
 
   def url: String = s"http://${config.hostname}:${fetchPort().getOrElse("")}"
 
@@ -93,6 +96,7 @@ sealed abstract class ZipkinComponent(val id: String = "0") {
       .addUris(CommandInfo.URI.newBuilder().setValue(s"${Config.getApi}/query/" + HttpServer.query.getName))
       .addUris(CommandInfo.URI.newBuilder().setValue(s"${Config.getApi}/web/" + HttpServer.web.getName))
       .addUris(CommandInfo.URI.newBuilder().setValue(s"${Config.getApi}/jar/" + HttpServer.jar.getName))
+      .addUris(CommandInfo.URI.newBuilder().setValue(s"${Config.getApi}/web-resources/" + HttpServer.webResources.getName).setExtract(true))
       .setValue(cmd)
 
     HttpServer.collectorConfigFiles.foreach { f =>
@@ -212,7 +216,7 @@ object ZipkinComponent {
     zc.config.mem = config.mem
     zc.config.ports = config.ports
     zc.config.flags = config.flags
-    zc.config.envVariables = config.envVariables
+    zc.config.env = config.env
     zc.config.hostname = config.hostname
     zc
   }
@@ -229,14 +233,16 @@ case class Collector(override val id: String = "0") extends ZipkinComponent(id) 
   override def componentName = "collector"
 
   override def setDefaultConfig(): TaskConfig = {
-    TaskConfig(1, 256, Nil, IMap(), IMap(), Some("collector-dev.scala"))
+    TaskConfig(0.5, 256, Nil, IMap(), IMap(), Some("collector-dev.scala"))
   }
 
   override def configurePort(port: Long): Unit = {
-    this.config.envVariables = this.config.envVariables + ("COLLECTOR_PORT" -> port.toString)
+    this.config.env = this.config.env + ("COLLECTOR_PORT" -> port.toString)
   }
 
-  override def fetchPort() = this.config.envVariables.get("COLLECTOR_PORT")
+  override def fetchPort() = this.config.env.get("COLLECTOR_PORT")
+
+  override def postConfig(): Unit = {}
 }
 
 case class QueryService(override val id: String = "0") extends ZipkinComponent(id) {
@@ -244,14 +250,16 @@ case class QueryService(override val id: String = "0") extends ZipkinComponent(i
   override def componentName = "query"
 
   override def setDefaultConfig(): TaskConfig = {
-    TaskConfig(1, 256, Nil, IMap(), IMap(), Some("query-dev.scala"))
+    TaskConfig(0.5, 256, Nil, IMap(), IMap(), Some("query-dev.scala"))
   }
 
   override def configurePort(port: Long): Unit = {
-    this.config.envVariables = this.config.envVariables + ("QUERY_PORT" -> port.toString)
+    this.config.env = this.config.env + ("QUERY_PORT" -> port.toString)
   }
 
-  override def fetchPort() = this.config.envVariables.get("QUERY_PORT")
+  override def fetchPort() = this.config.env.get("QUERY_PORT")
+
+  override def postConfig(): Unit = {}
 }
 
 case class WebService(override val id: String = "0") extends ZipkinComponent(id) {
@@ -259,14 +267,16 @@ case class WebService(override val id: String = "0") extends ZipkinComponent(id)
   override def componentName = "web"
 
   override def setDefaultConfig(): TaskConfig = {
-    TaskConfig(1, 256)
+    TaskConfig(0.5, 256, Nil, IMap(), IMap())
   }
 
   override def configurePort(port: Long): Unit = {
-    this.config.flags = this.config.flags + ("zipkin.web.port" -> port.toString)
+    this.config.flags = this.config.flags + ("zipkin.web.port" -> s":${port.toString}")
   }
 
   override def fetchPort() = this.config.flags.get("zipkin.web.port")
+
+  override def postConfig(): Unit = { this.config.flags = this.config.flags + ("zipkin.web.resourcesRoot" -> "resources") }
 }
 
 object Collector {

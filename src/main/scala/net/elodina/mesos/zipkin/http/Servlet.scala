@@ -76,6 +76,7 @@ class Servlet extends HttpServlet {
     else if (uri.startsWith("/web/")) downloadFile(HttpServer.web, response)
     else if (uri.startsWith("/collector-conf/")) downloadConfigFile(uri, response, HttpServer.collectorConfigFiles)
     else if (uri.startsWith("/query-conf/")) downloadConfigFile(uri, response, HttpServer.queryConfigFiles)
+    else if (uri.startsWith("/web-resources/")) downloadFile(HttpServer.webResources, response)
     else if (uri.startsWith("/api")) handleApi(request, response)
     else response.sendError(404)
   }
@@ -139,9 +140,10 @@ class Servlet extends HttpServlet {
     val constraints = Option(request.getParameter("constraints"))
     val ports = Option(request.getParameter("port"))
     val flags = Option(request.getParameter("flags"))
-    val envVariables = Option(request.getParameter("envvariables"))
+    val env = Option(request.getParameter("env"))
     val configFile = Option(request.getParameter("configfile"))
     val existing = ids.filter(id => fetchCollection.exists(_.id == id))
+    println(s"Got parameters: \n${request.getParameterMap.foreach{ case (k, v) => println(s"  $k:$v")}}")
     if (existing.nonEmpty) {
       response.getWriter.println(createApiResponse(false, s"Zipkin $componentName instance(s) ${existing.mkString(",")} already exist", None))
     } else {
@@ -150,9 +152,9 @@ class Servlet extends HttpServlet {
         cpus.foreach(cpus => component.config.cpus = cpus.toDouble)
         mem.foreach(mem => component.config.mem = mem.toDouble)
         ports.foreach(ports => component.config.ports = URange.parseRanges(ports))
-        component.constraints ++= Constraint.parse(constraints.getOrElse("hostname=unique"))
+        component.constraints ++= Constraint.parse(constraints.getOrElse(""))
         flags.foreach(flags => component.config.flags = Util.parseMap(flags))
-        envVariables.foreach(ev => component.config.envVariables = Util.parseMap(ev))
+        env.foreach(ev => component.config.env = Util.parseMap(ev))
         configFile.foreach(cf => component.config.configFile = Some(cf))
         fetchCollection += component
         component
@@ -225,7 +227,7 @@ class Servlet extends HttpServlet {
             case ("cpu", values) => component.config.cpus = Try(values.head.toDouble).getOrElse(component.config.cpus)
             case ("mem", values) => component.config.mem = Try(values.head.toDouble).getOrElse(component.config.mem)
             case ("flags", values) => component.config.flags = Try(Util.parseMap(values.head)).getOrElse(component.config.flags)
-            case ("envVariables", values) => component.config.envVariables = Try(Util.parseMap(values.head)).getOrElse(component.config.envVariables)
+            case ("env", values) => component.config.env = Try(Util.parseMap(values.head)).getOrElse(component.config.env)
             case ("configFile", values) => component.config.configFile = Some(values.head)
             case other => logger.debug(s"Got invalid configuration value: $other")
           }

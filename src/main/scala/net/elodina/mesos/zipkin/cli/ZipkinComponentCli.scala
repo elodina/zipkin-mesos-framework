@@ -85,10 +85,11 @@ object ZipkinComponentCli {
     "mem" -> "mem amount in Mb"
     ))
     configureCLParser(parser, Map(
-      "flags" -> "App flags",
-      "envVariables" -> "Environment variables",
+      "flags" -> "App flags (zipkin.web.query.dest=master:31001)",
+      "env" -> "Environment variables (KAFKA_ZOOKEPER=master:2181)",
       "ports" -> "port or range (31092, 31090..31100). Default - auto",
-      "configFile" -> "Configuration file to launch an instance"
+      "configFile" -> "Configuration file to launch an instance",
+      "constraints" -> "Constraints (hostname=like:master,rack=like:1.*). See below."
     ))
 
     val cmd = if (add) "add" else "config"
@@ -104,9 +105,10 @@ object ZipkinComponentCli {
     readCLProperty[java.lang.Double]("cpu", options).foreach(x => params += ("cpu" -> x.toString))
     readCLProperty[java.lang.Double]("mem", options).foreach(x => params += ("mem" -> x.toString))
     readCLProperty[String]("flags", options).foreach(x => params += ("flags" -> x))
-    readCLProperty[String]("envVariables", options).foreach(x => params += ("envVariables" -> x))
+    readCLProperty[String]("env", options).foreach(x => params += ("env" -> x))
     readCLProperty[String]("ports", options).foreach(x => params += ("ports" -> x))
     readCLProperty[String]("configFile", options).foreach(x => params += ("configFile" -> x))
+    readCLProperty[String]("constraints", options).foreach(x => params += ("constraints" -> x))
 
     //println(s"got params: $params")
     val response = deserializeJson.get(sendRequest(s"/$componentName/$cmd", params.toMap))
@@ -199,7 +201,7 @@ object ZipkinComponentCli {
       case _ => config.ports.mkString(",")
     }
     printLine(s"port: $ports", indent + 1)
-    printLine(s"envVariables: ${Util.formatMap(config.envVariables)}", indent + 1)
+    printLine(s"env: ${Util.formatMap(config.env)}", indent + 1)
     printLine(s"flags: ${Util.formatMap(config.flags)}", indent + 1)
     config.configFile.foreach(cf => printLine(s"configFile: $cf", indent + 1))
   }

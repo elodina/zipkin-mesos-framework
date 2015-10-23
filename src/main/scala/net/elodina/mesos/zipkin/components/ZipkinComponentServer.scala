@@ -44,7 +44,7 @@ class ZipkinComponentServer {
     val configFileArg = taskConfig.configFile.map(Seq("-f", _))
     var command = Seq("java", "-jar", distToLaunch.getCanonicalPath)
     configFileArg.foreach(command ++= _)
-    command ++= taskConfig.flags.map { case (k: String, v: String) => s"--$k=$v" }
-    Process(command, Some(new File(".")), taskConfig.envVariables.toList:_*)
+    command ++= taskConfig.flags.map { case (k: String, v: String) => s"-$k=$v" }
+    Process(command, Some(new File(".")), taskConfig.env.toList:_*)
   }
 }

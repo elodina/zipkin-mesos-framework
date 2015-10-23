@@ -17,13 +17,15 @@ object HttpServer {
   val collectorMask: String = "zipkin-collector-service.*\\.jar"
   val queryMask: String = "zipkin-query-service.*\\.jar"
   val webMask: String = "zipkin-web.*\\.jar"
-  val collectorConfigMask = "collector-.*\\.scala"
-  val queryConfigMask = "query-.*\\.scala"
+  val collectorConfigMask: String = "collector-.*\\.scala"
+  val queryConfigMask: String = "query-.*\\.scala"
+  val webResourcesMask = "zipkin-web-resources.*\\.tar.gz"
 
   private[zipkin] var jar: File = null
   private[zipkin] var collector: File = null
   private[zipkin] var query: File = null
   private[zipkin] var web: File = null
+  private[zipkin] var webResources: File = null
   private[zipkin] var collectorConfigFiles: List[File] = Nil
   private[zipkin] var queryConfigFiles: List[File] = Nil
 
@@ -62,12 +64,14 @@ object HttpServer {
       if (file.getName.matches(webMask)) web = file
       if (file.getName.matches(collectorConfigMask)) collectorConfigFiles = file :: collectorConfigFiles
       if (file.getName.matches(queryConfigMask)) queryConfigFiles = file :: queryConfigFiles
+      if (file.getName.matches(webResourcesMask)) webResources = file
     }
 
     if (jar == null) throw new IllegalStateException(jarMask + " not found in current dir")
     if (collector == null) throw new IllegalStateException(collectorMask + " not found in current dir")
     if (query == null) throw new IllegalStateException(queryMask + " not found in current dir")
     if (web == null) throw new IllegalStateException(webMask + " not found in current dir")
+    if (webResources == null) throw new IllegalStateException(webResourcesMask + " not found in current dir")
   }
 
   def stop() {

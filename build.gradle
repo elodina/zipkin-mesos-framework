@@ -7,6 +7,9 @@ jar.archiveName = "zipkin-mesos-${version}.jar"
 
 repositories {
     mavenCentral()
+    maven {
+        url "http://maven.twttr.com/"
+    }
 }
 
 buildDir = 'out/gradle'
@@ -19,6 +22,14 @@ sourceSets {
     test {
         scala { srcDirs = ['src/test/scala'] }
     }
+}
+
+test {
+    exclude "**/KafkaPing*"
+}
+
+task ping(type: Test) {
+    include "**/KafkaPing*"
 }
 
 dependencies {
@@ -36,6 +47,11 @@ dependencies {
     compile "javax.servlet:javax.servlet-api:3.0.1"
     compile "com.101tec:zkclient:0.5"
     compile "com.typesafe.play:play-json_2.10:2.3.9"
+    // TODO: as Zipkin lib is compiled with Scala 2.11, it is forcing version 2.11 to be used.
+    // So Zipkin dependencies need to be moved out of the testCompile scope to the custom one
+    testCompile "org.apache.kafka:kafka_2.11:0.8.2.1"
+    testCompile "io.zipkin:zipkin-common:1.14.1"
+    testCompile "io.zipkin:zipkin-receiver-kafka:1.14.1"
 
     testCompile 'junit:junit:4.12'
 }
