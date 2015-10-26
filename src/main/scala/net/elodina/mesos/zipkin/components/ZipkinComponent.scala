@@ -316,12 +316,11 @@ case class WebService(override val id: String = "0") extends ZipkinComponent(id)
     this.config.flags = this.config.flags + ("zipkin.web.resourcesRoot" -> "resources")
   }
 
-  // TODO: web service's admin port cannot be configured at the moment, need to make a PR to Zipkin to fix
   override def configureAdminPort(port: Long): Unit = {
-    this.config.env = this.config.env + ("WEB_ADMIN_PORT" -> port.toString)
+    this.config.flags = this.config.flags + ("admin.port" -> port.toString)
   }
 
-  override def fetchAdminPort(): Option[String] = this.config.env.get("WEB_ADMIN_PORT")
+  override def fetchAdminPort(): Option[String] = this.config.flags.get("admin.port")
 }
 
 object Collector {
