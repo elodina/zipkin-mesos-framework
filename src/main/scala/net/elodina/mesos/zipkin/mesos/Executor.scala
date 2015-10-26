@@ -68,14 +68,20 @@ object Executor extends org.apache.mesos.Executor {
           zipkinServer.await().foreach(exitCode => if (exitCode != 0) {
             logger.error(s"Zipkin component process finished with exitCode $exitCode")
           })
-          // TODO: consider sending TASK_FAILED on non-zero exit code
-          driver.sendStatusUpdate(TaskStatus.newBuilder().setTaskId(task.getTaskId).setState(TaskState.TASK_FINISHED).build)
+          val statusToSend = if (zipkinServer.acknowledgeShutdownStatus()) {
+            logger.info("The task has been shut down from the scheduler")
+            TaskState.TASK_FINISHED
+          } else {
+            logger.info("The task has failed for an unknown reason")
+            TaskState.TASK_FAILED
+          }
+          driver.sendStatusUpdate(TaskStatus.newBuilder().setTaskId(task.getTaskId).setState(statusToSend).build)
         } catch {
           case t: Throwable =>
             logger.error("", t)
             sendTaskFailed(driver, task, t)
         } finally {
-          stopExecutor()
+          stopExecutor(shutdownInitiated = false)
         }
       }
     }.start()
@@ -103,9 +109,9 @@ object Executor extends org.apache.mesos.Executor {
       .setMessage("" + stackTrace).build)
   }
 
-  private[zipkin] def stopExecutor(async: Boolean = false) {
+  private[zipkin] def stopExecutor(shutdownInitiated: Boolean = true, async: Boolean = false) {
     def triggerStop() {
-      if (zipkinServer.isStarted) zipkinServer.stop()
+      if (zipkinServer.isStarted) zipkinServer.stop(shutdownInitiated)
       //TODO stop driver here?
     }
 

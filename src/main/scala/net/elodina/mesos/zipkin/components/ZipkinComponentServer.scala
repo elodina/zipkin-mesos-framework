@@ -11,6 +11,8 @@ class ZipkinComponentServer {
 
   var process: Process = null
 
+  @volatile var shutdownInitiated = false
+
   def isStarted = Option(process).isDefined
 
   def start(taskConfig: TaskConfig, taskId: String) = {
@@ -29,8 +31,17 @@ class ZipkinComponentServer {
     if (isStarted) Some(process.exitValue()) else None
   }
 
-  def stop() {
-    if (isStarted) process.destroy()
+  def acknowledgeShutdownStatus(): Boolean = {
+    val oldStatus = shutdownInitiated
+    if (shutdownInitiated) shutdownInitiated = false
+    oldStatus
+  }
+
+  def stop(shutdownInitiated: Boolean) {
+    if (isStarted) {
+      this.shutdownInitiated = shutdownInitiated
+      process.destroy()
+    }
   }
 
   private def initJar(jarMask: String): File = {
@@ -45,6 +56,6 @@ class ZipkinComponentServer {
     var command = Seq("java", "-jar", distToLaunch.getCanonicalPath)
     configFileArg.foreach(command ++= _)
     command ++= taskConfig.flags.map { case (k: String, v: String) => s"-$k=$v" }
-    Process(command, Some(new File(".")), taskConfig.env.toList:_*)
+    Process(command, Some(new File(".")), taskConfig.env.toList: _*)
   }
 }
