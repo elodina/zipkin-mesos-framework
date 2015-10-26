@@ -36,10 +36,6 @@ object SchedulerCli {
         "framework-timeout" -> ("Framework timeout (30s, 1m, 1h). Default - " + Config.frameworkTimeout),
         "api" -> "Api url. Example: http://master:7000",
         "bind-address" -> "Scheduler bind address (master, 0.0.0.0, 192.168.50.*, if:eth1). Default - all",
-        "zk" -> """Kafka zookeeper.connect. Examples:
-                  | - master:2181
-                  | - master:2181,master2:2181""".stripMargin,
-        "jre" -> "JRE zip-file (jre-7-openjdk.zip). Default - none.",
         "log" -> "Log file to use. Default - stdout."
       )
     )
@@ -124,14 +120,6 @@ object SchedulerCli {
         case e: IllegalArgumentException => throw new CliError("Invalid bind-address")
       }
     }
-
-    readCLProperty[String]("zk", options).foreach(x => Config.zk = Some(x))
-
-    if (Config.zk.isEmpty) throw new CliError(s"Undefined zk. $provideOption")
-
-    readCLProperty[String]("jre", options).foreach(x => Config.jre = Some(new File(x)))
-
-    Config.jre.foreach(jre => if (!jre.exists()) throw new CliError("JRE file doesn't exists"))
 
     readCLProperty[String]("log", options).foreach(x => Config.log = Some(new File(x)))
 

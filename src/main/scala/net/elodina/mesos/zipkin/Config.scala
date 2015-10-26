@@ -38,11 +38,9 @@ object Config {
   var frameworkRole: String = "*"
   var frameworkTimeout: Period = new Period("30d")
 
-  var jre: Option[File] = None
   var log: Option[File] = None
   var api: Option[String] = None
   var bindAddress: Option[BindAddress] = None
-  var zk: Option[String] = None
 
   def apiPort: Int = {
     val port = new URI(getApi).getPort
@@ -89,11 +87,9 @@ object Config {
     if (props.containsKey("framework-role")) frameworkRole = props.getProperty("framework-role")
     if (props.containsKey("framework-timeout")) frameworkTimeout = new Period(props.getProperty("framework-timeout"))
 
-    if (props.containsKey("jre")) jre = Some(new File(props.getProperty("jre")))
     if (props.containsKey("log")) log = Some(new File(props.getProperty("log")))
     if (props.containsKey("api")) api = Some(props.getProperty("api"))
     if (props.containsKey("bind-address")) bindAddress = Some(new BindAddress(props.getProperty("bind-address")))
-    if (props.containsKey("zk")) zk = Some(props.getProperty("zk"))
   }
 
   override def toString: String = {
@@ -102,7 +98,7 @@ object Config {
         |mesos: master=$master, user=${if (user.isEmpty || user.get.isEmpty) "<default>" else user}
         |principal=${principal.getOrElse("<none>")}, secret=${if (secret.isDefined) "*****" else "<none>"}
         |framework: name=$frameworkName, role=$frameworkRole, timeout=$frameworkTimeout
-        |api: $api, bind-address: ${bindAddress.getOrElse("<all>")}, zk: $zk, jre: ${jre.getOrElse("<none>")}
+        |api: $api, bind-address: ${bindAddress.getOrElse("<all>")}}
     """.stripMargin.trim
   }
 }
