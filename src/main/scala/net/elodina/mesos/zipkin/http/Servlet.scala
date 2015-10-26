@@ -140,6 +140,7 @@ class Servlet extends HttpServlet {
     val mem = Option(request.getParameter("mem"))
     val constraints = Option(request.getParameter("constraints"))
     val ports = Option(request.getParameter("port"))
+    val adminPorts = Option(request.getParameter("adminPort"))
     val flags = Option(request.getParameter("flags"))
     val env = Option(request.getParameter("env"))
     val configFile = Option(request.getParameter("configFile"))
@@ -152,6 +153,7 @@ class Servlet extends HttpServlet {
         cpus.foreach(cpus => component.config.cpus = cpus.toDouble)
         mem.foreach(mem => component.config.mem = mem.toDouble)
         ports.foreach(ports => component.config.ports = URange.parseRanges(ports))
+        adminPorts.foreach(adminPorts => component.config.adminPorts = URange.parseRanges(adminPorts))
         component.constraints ++= Constraint.parse(constraints.getOrElse(""))
         flags.foreach(flags => component.config.flags = Util.parseMap(flags))
         env.foreach(ev => component.config.env = Util.parseMap(ev))
@@ -224,6 +226,7 @@ class Servlet extends HttpServlet {
             //TODO: parsing error handling
             case ("constraints", values) => component.constraints ++= Try(Constraint.parse(values.head)).getOrElse(Map())
             case ("port", Array(ports)) => component.config.ports = URange.parseRanges(ports)
+            case ("adminPort", Array(ports)) => component.config.adminPorts = URange.parseRanges(ports)
             case ("cpu", values) => component.config.cpus = Try(values.head.toDouble).getOrElse(component.config.cpus)
             case ("mem", values) => component.config.mem = Try(values.head.toDouble).getOrElse(component.config.mem)
             case ("flags", values) => component.config.flags = Try(Util.parseMap(values.head)).getOrElse(component.config.flags)

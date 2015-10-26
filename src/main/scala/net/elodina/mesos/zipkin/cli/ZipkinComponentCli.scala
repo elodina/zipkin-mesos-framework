@@ -88,6 +88,7 @@ object ZipkinComponentCli {
       "flags" -> "App flags (zipkin.web.query.dest=master:31001)",
       "env" -> "Environment variables (KAFKA_ZOOKEPER=master:2181)",
       "port" -> "port or range (31092, 31090..31100). Default - auto",
+      "adminPort" -> "port or range (31092, 31090..31100). Default - auto",
       "configFile" -> "Configuration file to launch an instance",
       "constraints" -> "Constraints (hostname=like:master,rack=like:1.*). See below."
     ))
@@ -107,6 +108,7 @@ object ZipkinComponentCli {
     readCLProperty[String]("flags", options).foreach(x => params += ("flags" -> x))
     readCLProperty[String]("env", options).foreach(x => params += ("env" -> x))
     readCLProperty[String]("port", options).foreach(x => params += ("port" -> x))
+    readCLProperty[String]("adminPort", options).foreach(x => params += ("adminPort" -> x))
     readCLProperty[String]("configFile", options).foreach(x => params += ("configFile" -> x))
     readCLProperty[String]("constraints", options).foreach(x => params += ("constraints" -> x))
 
@@ -195,11 +197,16 @@ object ZipkinComponentCli {
     printLine("config:", indent)
     printLine(s"cpu: ${config.cpus}", indent + 1)
     printLine(s"mem: ${config.mem}", indent + 1)
-    val ports = config.ports match {
-      case Nil => "auto"
-      case _ => config.ports.mkString(",")
+    def formatPorts = { ports: List[AnyRef] =>
+      ports match {
+        case Nil => "auto"
+        case _ => ports.mkString(",")
+      }
     }
+    val ports = formatPorts(config.ports)
+    val adminPorts = formatPorts(config.adminPorts)
     printLine(s"port: $ports", indent + 1)
+    printLine(s"adminPort: $adminPorts", indent + 1)
     printLine(s"env: ${Util.formatMap(config.env)}", indent + 1)
     printLine(s"flags: ${Util.formatMap(config.flags)}", indent + 1)
     config.configFile.foreach(cf => printLine(s"configFile: $cf", indent + 1))

@@ -1,22 +1,27 @@
 package net.elodina.mesos.zipkin.components
 
-import java.util.{UUID, Date}
+import java.util.{Date, UUID}
+
 import com.google.protobuf.ByteString
 import net.elodina.mesos.zipkin.Config
 import net.elodina.mesos.zipkin.http.HttpServer
-import net.elodina.mesos.zipkin.utils.{Util, Range}
+import net.elodina.mesos.zipkin.utils.{Range, Util}
 import org.apache.mesos.Protos
 import org.apache.mesos.Protos._
 import play.api.libs.functional.syntax._
-import play.api.libs.json.{JsValue, Json, Writes, _}
-import play.api.libs.json.Writes._
 import play.api.libs.json.Reads._
-import scala.collection.{mutable, Map}
-import scala.collection.immutable.{Map => IMap}
+import play.api.libs.json.Writes._
+import play.api.libs.json.{JsValue, Json, Writes, _}
+
 import scala.collection.JavaConversions._
+import scala.collection.immutable.{Map => IMap}
+import scala.collection.{Map, mutable}
 import scala.concurrent.duration.Duration
 
-case class TaskConfig(var cpus: Double = 1, var mem: Double = 256, var ports: List[Range] = Nil,
+case class TaskConfig(var cpus: Double = 1,
+                      var mem: Double = 256,
+                      var ports: List[Range] = Nil,
+                      var adminPorts: List[Range] = Nil,
                       var env: IMap[String, String] = IMap(),
                       var flags: IMap[String, String] = IMap(),
                       var configFile: Option[String] = None,
@@ -25,9 +30,10 @@ case class TaskConfig(var cpus: Double = 1, var mem: Double = 256, var ports: Li
 object TaskConfig {
 
   implicit val reader = (
-      (__ \ 'cpu).read[Double] and
+    (__ \ 'cpu).read[Double] and
       (__ \ 'mem).read[Double] and
       (__ \ 'ports).read[String].map(Range.parseRanges) and
+      (__ \ 'adminPorts).read[String].map(Range.parseRanges) and
       (__ \ 'env).read[IMap[String, String]] and
       (__ \ 'flags).read[IMap[String, String]] and
       (__ \ 'configFile).readNullable[String] and
@@ -39,6 +45,7 @@ object TaskConfig {
         "cpu" -> tc.cpus,
         "mem" -> tc.mem,
         "ports" -> tc.ports.mkString(","),
+        "adminPorts" -> tc.adminPorts.mkString(","),
         "env" -> tc.env,
         "flags" -> tc.flags,
         "configFile" -> tc.configFile,
@@ -63,28 +70,39 @@ sealed abstract class ZipkinComponent(val id: String = "0") {
 
   def fetchPort(): Option[String]
 
+  def configureAdminPort(port: Long): Unit
+
+  def fetchAdminPort(): Option[String]
+
   /* Whatever should happen with task configuration after it is configured by user should go here. */
   def postConfig(): Unit
 
   def url: String = s"http://${config.hostname}:${fetchPort().getOrElse("")}"
 
   def createTask(offer: Offer): TaskInfo = {
-    val port = getPort(offer).getOrElse(throw new IllegalStateException("No suitable port"))
+    val ports = getPorts(offer)
+    if (ports.size != 2) throw new IllegalStateException("No suitable port")
 
     val name = s"zipkin-$componentName-${this.id}"
     val id = nextTaskId
     this.config.hostname = offer.getHostname
-    configurePort(port)
+    configurePort(ports.head)
+    configureAdminPort(ports.last)
 
     val taskId = TaskID.newBuilder().setValue(id).build
     TaskInfo.newBuilder().setName(name).setTaskId(taskId).setSlaveId(offer.getSlaveId)
       .setExecutor(newExecutor(s"$componentName-${this.id}"))
       .setData(ByteString.copyFromUtf8(Json.stringify(Json.toJson(this.config))))
-      .addResources(Protos.Resource.newBuilder().setName("cpus").setType(Protos.Value.Type.SCALAR).setScalar(Protos.Value.Scalar.newBuilder().setValue(this.config.cpus)))
-      .addResources(Protos.Resource.newBuilder().setName("mem").setType(Protos.Value.Type.SCALAR).setScalar(Protos.Value.Scalar.newBuilder().setValue(this.config.mem)))
+      .addResources(Protos.Resource.newBuilder().setName("cpus").setType(Protos.Value.Type.SCALAR).setScalar(
+        Protos.Value.Scalar.newBuilder().setValue(this.config.cpus)))
+      .addResources(Protos.Resource.newBuilder().setName("mem").setType(Protos.Value.Type.SCALAR).setScalar(
+        Protos.Value.Scalar.newBuilder().setValue(this.config.mem)))
       .addResources(Protos.Resource.newBuilder().setName("ports").setType(Protos.Value.Type.RANGES).setRanges(
-        Protos.Value.Ranges.newBuilder().addRange(Protos.Value.Range.newBuilder().setBegin(port).setEnd(port))
-      )).build
+      Protos.Value.Ranges.newBuilder().addAllRange(List(
+        Protos.Value.Range.newBuilder().setBegin(ports.head).setEnd(ports.head).build(),
+        Protos.Value.Range.newBuilder().setBegin(ports.last).setEnd(ports.last).build()
+      ))
+    )).build
   }
 
   private[zipkin] def newExecutor(id: String): ExecutorInfo = {
@@ -108,9 +126,9 @@ sealed abstract class ZipkinComponent(val id: String = "0") {
     }
 
     ExecutorInfo.newBuilder()
-      .setExecutorId(ExecutorID.newBuilder().setValue(s"$componentName-$id"))
+      .setExecutorId(ExecutorID.newBuilder().setValue(s"$id"))
       .setCommand(commandBuilder)
-      .setName(s"zipkin-$componentName-$id")
+      .setName(s"zipkin-$id")
       .build
   }
 
@@ -122,7 +140,7 @@ sealed abstract class ZipkinComponent(val id: String = "0") {
 
     val offerResources = offer.getResourcesList.toList.map(res => res.getName -> res).toMap
 
-    if (getPort(offer).isEmpty) return Some("no suitable port")
+    if (getPorts(offer).size != 2) return Some("no suitable port")
 
     offerResources.get("cpus") match {
       case Some(cpusResource) => if (cpusResource.getScalar.getValue < config.cpus) return Some(s"cpus ${cpusResource.getScalar.getValue} < ${config.cpus}")
@@ -151,11 +169,15 @@ sealed abstract class ZipkinComponent(val id: String = "0") {
     None
   }
 
-  private[zipkin] def getPort(offer: Offer): Option[Long] = {
-    val ports = Util.getRangeResources(offer, "ports").map(r => Range(r.getBegin.toInt, r.getEnd.toInt))
+  private[zipkin] def getPorts(offer: Offer): List[Long] = {
+    val offeredPorts = Util.getRangeResources(offer, "ports").map(r => Range(r.getBegin.toInt, r.getEnd.toInt))
 
-    if (this.config.ports == Nil) ports.headOption.map(_.start)
-    else ports.flatMap(range => this.config.ports.flatMap(range.overlap)).headOption.map(_.start)
+    Range.overlapAndUpdate(this.config.ports, offeredPorts) match {
+      case (Some(definedPort), updOfferedPorts) =>
+        definedPort :: Range.overlapAndUpdate(this.config.adminPorts, updOfferedPorts)._1.map(x => List(x.toLong)).getOrElse(Nil)
+      case (None, _) => List()
+    }
+
   }
 
   def waitFor(state: State, timeout: Duration): Boolean = {
@@ -215,6 +237,7 @@ object ZipkinComponent {
     zc.config.cpus = config.cpus
     zc.config.mem = config.mem
     zc.config.ports = config.ports
+    zc.config.adminPorts = config.adminPorts
     zc.config.flags = config.flags
     zc.config.env = config.env
     zc.config.hostname = config.hostname
@@ -234,7 +257,7 @@ case class Collector(override val id: String = "0") extends ZipkinComponent(id) 
   override def componentName = "collector"
 
   override def setDefaultConfig(): TaskConfig = {
-    TaskConfig(0.5, 256, Nil, IMap(), IMap(), Some("collector-dev.scala"))
+    TaskConfig(0.5, 256, Nil, Nil, IMap(), IMap(), Some("collector-cassandra.scala"))
   }
 
   override def configurePort(port: Long): Unit = {
@@ -244,6 +267,12 @@ case class Collector(override val id: String = "0") extends ZipkinComponent(id) 
   override def fetchPort() = this.config.env.get("COLLECTOR_PORT")
 
   override def postConfig(): Unit = {}
+
+  override def configureAdminPort(port: Long): Unit = {
+    this.config.env = this.config.env + ("COLLECTOR_ADMIN_PORT" -> port.toString)
+  }
+
+  override def fetchAdminPort(): Option[String] = this.config.env.get("COLLECTOR_ADMIN_PORT")
 }
 
 case class QueryService(override val id: String = "0") extends ZipkinComponent(id) {
@@ -251,7 +280,7 @@ case class QueryService(override val id: String = "0") extends ZipkinComponent(i
   override def componentName = "query"
 
   override def setDefaultConfig(): TaskConfig = {
-    TaskConfig(0.5, 256, Nil, IMap(), IMap(), Some("query-dev.scala"))
+    TaskConfig(0.5, 256, Nil, Nil, IMap(), IMap(), Some("query-cassandra.scala"))
   }
 
   override def configurePort(port: Long): Unit = {
@@ -261,6 +290,12 @@ case class QueryService(override val id: String = "0") extends ZipkinComponent(i
   override def fetchPort() = this.config.env.get("QUERY_PORT")
 
   override def postConfig(): Unit = {}
+
+  override def configureAdminPort(port: Long): Unit = {
+    this.config.env = this.config.env + ("QUERY_ADMIN_PORT" -> port.toString)
+  }
+
+  override def fetchAdminPort(): Option[String] = this.config.env.get("QUERY_ADMIN_PORT")
 }
 
 case class WebService(override val id: String = "0") extends ZipkinComponent(id) {
@@ -268,7 +303,7 @@ case class WebService(override val id: String = "0") extends ZipkinComponent(id)
   override def componentName = "web"
 
   override def setDefaultConfig(): TaskConfig = {
-    TaskConfig(0.5, 256, Nil, IMap(), IMap())
+    TaskConfig(0.5, 256, Nil, Nil, IMap(), IMap())
   }
 
   override def configurePort(port: Long): Unit = {
@@ -277,7 +312,16 @@ case class WebService(override val id: String = "0") extends ZipkinComponent(id)
 
   override def fetchPort() = this.config.flags.get("zipkin.web.port")
 
-  override def postConfig(): Unit = { this.config.flags = this.config.flags + ("zipkin.web.resourcesRoot" -> "resources") }
+  override def postConfig(): Unit = {
+    this.config.flags = this.config.flags + ("zipkin.web.resourcesRoot" -> "resources")
+  }
+
+  // TODO: web service's admin port cannot be configured at the moment, need to make a PR to Zipkin to fix
+  override def configureAdminPort(port: Long): Unit = {
+    this.config.env = this.config.env + ("WEB_ADMIN_PORT" -> port.toString)
+  }
+
+  override def fetchAdminPort(): Option[String] = this.config.env.get("WEB_ADMIN_PORT")
 }
 
 object Collector {
