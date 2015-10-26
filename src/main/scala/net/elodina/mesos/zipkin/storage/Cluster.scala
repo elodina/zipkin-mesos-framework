@@ -22,9 +22,9 @@ case class Cluster(_collectors: List[Collector] = Nil,
   private[zipkin] val queryServices: mutable.Buffer[QueryService] = new CopyOnWriteArrayList[QueryService]()
   private[zipkin] val webServices: mutable.Buffer[WebService] = new CopyOnWriteArrayList[WebService]()
 
-  collectors ++ _collectors
-  queryServices ++ _queryServices
-  webServices ++ _webServices
+  collectors ++= _collectors
+  queryServices ++= _queryServices
+  webServices ++= _webServices
 
   def clear(): Unit = {
     collectors.clear()
@@ -37,9 +37,9 @@ case class Cluster(_collectors: List[Collector] = Nil,
   def load() {
     storage.load(Cluster.reader).foreach { cluster =>
       this.frameworkId = cluster.frameworkId
-      collectors ++ cluster.collectors
-      webServices ++ cluster.webServices
-      queryServices ++ cluster.queryServices
+      collectors ++= cluster.collectors
+      webServices ++= cluster.webServices
+      queryServices ++= cluster.queryServices
     }
   }
 

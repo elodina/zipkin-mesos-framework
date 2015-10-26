@@ -252,7 +252,7 @@ class Servlet extends HttpServlet {
     val idExpr = request.getParameter("id")
     val ids = Util.expandIds(idExpr, fetchCollection)
     val missing = ids.filter(id => !fetchCollection.exists(id == _.id))
-    if (missing.nonEmpty) response.getWriter.println(ApiResponse(success = false,
+    if (missing.nonEmpty) response.getWriter.println(createApiResponse(false,
       s"Zipkin $componentName instance(s) ${missing.mkString(",")} do not exist", None))
     else action(ids, idExpr)
   }
