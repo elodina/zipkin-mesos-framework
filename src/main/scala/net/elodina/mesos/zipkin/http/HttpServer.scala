@@ -62,6 +62,9 @@ object HttpServer {
       if (file.getName.matches(collectorMask)) collector = file
       if (file.getName.matches(queryMask)) query = file
       if (file.getName.matches(webMask)) web = file
+    }
+
+    for (file <- new File("zipkin-deps").listFiles()) {
       if (file.getName.matches(collectorConfigMask)) collectorConfigFiles = file :: collectorConfigFiles
       if (file.getName.matches(queryConfigMask)) queryConfigFiles = file :: queryConfigFiles
       if (file.getName.matches(webResourcesMask)) webResources = file

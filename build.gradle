@@ -45,7 +45,12 @@ task ping(type: Test) {
     group = 'verification'
     testClassesDir = sourceSets.ping.output.classesDir
     classpath = sourceSets.ping.runtimeClasspath
+}
 
+allprojects {
+    tasks.matching { task -> task.name == "ping" }.all {
+        outputs.upToDateWhen { false }
+    }
 }
 
 dependencies {

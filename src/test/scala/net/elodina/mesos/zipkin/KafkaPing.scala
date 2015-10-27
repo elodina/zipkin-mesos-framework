@@ -14,6 +14,7 @@ class KafkaPing {
 
   lazy val KAFKA_BROKER = Option(System.getenv("KAFKA_BROKER")).getOrElse("localhost:9092")
   lazy val KAFKA_TOPIC = Option(System.getenv("KAFKA_TOPIC")).getOrElse("zipkin")
+  lazy val ANN_VALUE = Option(System.getenv("ANN_VALUE"))
 
   @Test
   def pingTest() {
@@ -38,7 +39,8 @@ class KafkaPing {
   }
 
   def createMessage(): Array[Byte] = {
-    val annotation = Annotation(System.currentTimeMillis(), "pong", Some(Endpoint((127 << 24 | 1), 80, "ping")))
+    val annotation = Annotation(System.currentTimeMillis(),
+      List(Some("pong"), ANN_VALUE, Some(UUID.randomUUID().toString)).flatten.mkString("-"), Some(Endpoint((127 << 24 | 1), 80, "ping")))
     val message = Span(1, "methodCall", 1, None, List(annotation), Nil)
     val codec = new SpanCodec()
     codec.encode(message)
