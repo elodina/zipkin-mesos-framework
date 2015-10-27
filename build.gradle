@@ -15,21 +15,37 @@ repositories {
 buildDir = 'out/gradle'
 libsDirName = '../../'
 
+configurations {
+    pingTestCompile.extendsFrom testCompile
+    pingTestRuntime.extendsFrom testRuntime
+}
+
 sourceSets {
     main {
         scala { srcDirs = ['src/main/scala'] }
     }
     test {
-        scala { srcDirs = ['src/test/scala'] }
+        scala {
+            srcDirs = ['src/test/scala']
+            exclude '**/KafkaPing.scala'
+        }
+    }
+    ping {
+        scala {
+            srcDirs = ['src/test/scala']
+            include '**/KafkaPing.scala'
+        }
+        compileClasspath = sourceSets.main.output + sourceSets.test.output + configurations.pingTestCompile
+        runtimeClasspath = output + compileClasspath + configurations.pingTestRuntime
     }
 }
 
-test {
-    exclude "**/KafkaPing*"
-}
-
 task ping(type: Test) {
-    include "**/KafkaPing*"
+    description = 'Sends dummy annotation to Kafka span receiver.'
+    group = 'verification'
+    testClassesDir = sourceSets.ping.output.classesDir
+    classpath = sourceSets.ping.runtimeClasspath
+
 }
 
 dependencies {
@@ -47,11 +63,9 @@ dependencies {
     compile "javax.servlet:javax.servlet-api:3.0.1"
     compile "com.101tec:zkclient:0.5"
     compile "com.typesafe.play:play-json_2.10:2.3.9"
-    // TODO: as Zipkin lib is compiled with Scala 2.11, it is forcing version 2.11 to be used.
-    // So Zipkin dependencies need to be moved out of the testCompile scope to the custom one
-    testCompile "org.apache.kafka:kafka_2.11:0.8.2.1"
-    testCompile "io.zipkin:zipkin-common:1.14.1"
-    testCompile "io.zipkin:zipkin-receiver-kafka:1.14.1"
+    pingTestCompile "org.apache.kafka:kafka_2.11:0.8.2.1"
+    pingTestCompile "io.zipkin:zipkin-common:1.14.1"
+    pingTestCompile "io.zipkin:zipkin-receiver-kafka:1.14.1"
 
     testCompile 'junit:junit:4.12'
 }
