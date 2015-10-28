@@ -69,8 +69,8 @@ class Servlet extends HttpServlet {
   def handle(request: HttpServletRequest, response: HttpServletResponse): Unit = {
     val uri = request.getRequestURI
 
-    //handling incoming request
-    if (uri.startsWith("/jar/")) downloadFile(HttpServer.jar, response)
+    if (uri.startsWith("/health")) handleHealth(response)
+    else if (uri.startsWith("/jar/")) downloadFile(HttpServer.jar, response)
     else if (uri.startsWith("/collector/")) downloadFile(HttpServer.collector, response)
     else if (uri.startsWith("/query/")) downloadFile(HttpServer.query, response)
     else if (uri.startsWith("/web/")) downloadFile(HttpServer.web, response)
@@ -79,6 +79,11 @@ class Servlet extends HttpServlet {
     else if (uri.startsWith("/web-resources/")) downloadFile(HttpServer.webResources, response)
     else if (uri.startsWith("/api")) handleApi(request, response)
     else response.sendError(404)
+  }
+
+  def handleHealth(response: HttpServletResponse) {
+    response.setContentType("text/plain; charset=utf-8")
+    response.getWriter.println("ok")
   }
 
   def downloadFile(file: File, response: HttpServletResponse) {

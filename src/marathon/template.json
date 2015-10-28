@@ -1,0 +1,25 @@
+{
+  "id": "zipkin-mesos-scheduler",
+  "cpus": 0.5,
+  "mem": 512,
+  "instances": 1,
+  "cmd": "java -jar zipkin-mesos-0.1.jar scheduler --debug true --master master:5050 --user vagrant --api http://$HOST:$PORT0",
+  "uris": [
+    "http://192.168.3.1:7777/zipkin-deps.tar.gz",
+    "http://192.168.3.1:7777/zipkin-mesos-0.1.jar",
+    "http://192.168.3.1:7777/zipkin-collector-service-1.14.1-all.jar",
+    "http://192.168.3.1:7777/zipkin-query-service-1.14.1-all.jar",
+    "http://192.168.3.1:7777/zipkin-web-1.14.1-all.jar"
+  ],
+  "healthChecks": [
+    {
+      "protocol": "HTTP",
+      "path": "/health",
+      "gracePeriodSeconds": 120,
+      "intervalSeconds": 60,
+      "portIndex": 0,
+      "timeoutSeconds": 30,
+      "maxConsecutiveFailures": 3
+    }
+  ]
+}

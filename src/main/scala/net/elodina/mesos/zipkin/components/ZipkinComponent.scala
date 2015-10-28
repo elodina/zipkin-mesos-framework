@@ -88,6 +88,7 @@ sealed abstract class ZipkinComponent(val id: String = "0") {
     this.config.hostname = offer.getHostname
     configurePort(ports.head)
     configureAdminPort(ports.last)
+    this.postConfig()
 
     val taskId = TaskID.newBuilder().setValue(id).build
     TaskInfo.newBuilder().setName(name).setTaskId(taskId).setSlaveId(offer.getSlaveId)
@@ -317,7 +318,7 @@ case class WebService(override val id: String = "0") extends ZipkinComponent(id)
   }
 
   override def configureAdminPort(port: Long): Unit = {
-    this.config.flags = this.config.flags + ("admin.port" -> port.toString)
+    this.config.flags = this.config.flags + ("admin.port" -> s":${port.toString}")
   }
 
   override def fetchAdminPort(): Option[String] = this.config.flags.get("admin.port")
