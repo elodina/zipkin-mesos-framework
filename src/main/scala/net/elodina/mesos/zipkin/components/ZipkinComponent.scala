@@ -1,11 +1,12 @@
 package net.elodina.mesos.zipkin.components
 
+import java.text.SimpleDateFormat
 import java.util.{Date, UUID}
 
 import com.google.protobuf.ByteString
 import net.elodina.mesos.zipkin.Config
 import net.elodina.mesos.zipkin.http.HttpServer
-import net.elodina.mesos.zipkin.utils.{Range, Util}
+import net.elodina.mesos.zipkin.utils.{Period, Range, Util}
 import org.apache.mesos.Protos
 import org.apache.mesos.Protos._
 import play.api.libs.functional.syntax._
@@ -55,11 +56,69 @@ object TaskConfig {
   }
 }
 
+case class Stickiness(period: Period = new Period("10m")) {
+
+  @volatile var hostname: Option[String] = None
+  @volatile var port: Option[Long] = None
+  @volatile var stopTime: Option[Date] = None
+
+  def expireDate: Option[Date] = {
+    stopTime.map(st => new Date(st.getTime + period.ms))
+  }
+
+  def expired(now: Date = new Date()): Boolean = {
+    expireDate.map(ed => now.getTime >= ed.getTime).getOrElse(true)
+  }
+
+  def registerStart(hostname: String, port: Long): Unit = {
+    this.hostname = Some(hostname)
+    this.port = Some(port)
+    stopTime = None
+  }
+
+  def registerStop(now: Date = new Date()): Unit = {
+    if (stopTime.isEmpty) this.stopTime = Some(now)
+  }
+
+  def allowsEndpoint(hostname: String, now: Date = new Date()): Boolean = {
+    this.hostname.map(defHost => expired(now) || defHost == hostname).getOrElse(true)
+  }
+}
+
+object Stickiness {
+
+  val sdf = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss.S")
+
+  implicit val reader = (
+    (__ \ 'period).read[String] and
+     (__ \ 'hostname).readNullable[String] and
+     (__ \ 'port).readNullable[Long] and
+     (__ \ 'stopTime).readNullable[String] )( (period, hostname, port, stopTime) => {
+         val stickiness = Stickiness(new Period(period))
+         stickiness.hostname = hostname
+         stickiness.port = port
+         stickiness.stopTime = stopTime.map(st => sdf.parse(st))
+         stickiness
+         })
+
+  implicit val writer = new Writes[Stickiness] {
+    def writes(s: Stickiness): JsValue = {
+      Json.obj(
+        "period" -> s.period.toString,
+        "hostname" -> s.hostname,
+        "port" -> s.port,
+        "stopTime" -> s.stopTime.map(st => sdf.format(st))
+      )
+    }
+  }
+}
+
 sealed abstract class ZipkinComponent(val id: String = "0") {
 
   var state: State = Added
   private[zipkin] val constraints: mutable.Map[String, List[Constraint]] = new mutable.HashMap[String, List[Constraint]]
   @volatile var task: Task = null
+  @volatile var stickiness: Stickiness = null
   var config = setDefaultConfig()
 
   def setDefaultConfig(): TaskConfig
@@ -78,6 +137,10 @@ sealed abstract class ZipkinComponent(val id: String = "0") {
   def postConfig(): Unit
 
   def url: String = s"http://${config.hostname}:${fetchPort().getOrElse("")}"
+
+  def fetchRunningInstancePort(): Long = {
+    fetchPort().map(_.toLong).getOrElse(throw new IllegalArgumentException("Port not specified for running instance"))
+  }
 
   def createTask(offer: Offer): TaskInfo = {
     val ports = getPorts(offer)
@@ -99,11 +162,11 @@ sealed abstract class ZipkinComponent(val id: String = "0") {
       .addResources(Protos.Resource.newBuilder().setName("mem").setType(Protos.Value.Type.SCALAR).setScalar(
         Protos.Value.Scalar.newBuilder().setValue(this.config.mem)))
       .addResources(Protos.Resource.newBuilder().setName("ports").setType(Protos.Value.Type.RANGES).setRanges(
-      Protos.Value.Ranges.newBuilder().addAllRange(List(
-        Protos.Value.Range.newBuilder().setBegin(ports.head).setEnd(ports.head).build(),
-        Protos.Value.Range.newBuilder().setBegin(ports.last).setEnd(ports.last).build()
-      ))
-    )).build
+        Protos.Value.Ranges.newBuilder().addAllRange(List(
+          Protos.Value.Range.newBuilder().setBegin(ports.head).setEnd(ports.head).build(),
+          Protos.Value.Range.newBuilder().setBegin(ports.last).setEnd(ports.last).build()
+        ))
+      )).build
   }
 
   private[zipkin] def newExecutor(id: String): ExecutorInfo = {
@@ -141,6 +204,9 @@ sealed abstract class ZipkinComponent(val id: String = "0") {
 
     val offerResources = offer.getResourcesList.toList.map(res => res.getName -> res).toMap
 
+    Option(stickiness).foreach(s => if (!s.allowsEndpoint(offer.getHostname))
+      return Some(s"${offer.getHostname} != stickiness host: ${s.hostname}"))
+
     if (getPorts(offer).size != 2) return Some("no suitable port")
 
     offerResources.get("cpus") match {
@@ -173,7 +239,18 @@ sealed abstract class ZipkinComponent(val id: String = "0") {
   private[zipkin] def getPorts(offer: Offer): List[Long] = {
     val offeredPorts = Util.getRangeResources(offer, "ports").map(r => Range(r.getBegin.toInt, r.getEnd.toInt))
 
-    Range.overlapAndUpdate(this.config.ports, offeredPorts) match {
+    val stickinessPort = Option(stickiness).flatMap(s => if (s.expired()) None else s.port)
+
+    val allowedEndpointPorts = this.config.ports match {
+      case Nil => stickinessPort.map(sp => List(Range(sp.toString))).getOrElse(Nil)
+      case list =>
+        // If stickiness port exists, check if it exists within defined ranges.
+        stickinessPort.map { sp =>
+          if (list.exists(r => r.overlap(Range(sp.toString)).isDefined)) List(Range(sp.toString)) else list
+        }.getOrElse(list)
+    }
+
+    Range.overlapAndUpdate(allowedEndpointPorts, offeredPorts) match {
       case (Some(definedPort), updOfferedPorts) =>
         definedPort :: Range.overlapAndUpdate(this.config.adminPorts, updOfferedPorts)._1.map(x => List(x.toLong)).getOrElse(Nil)
       case (None, _) => List()
@@ -220,11 +297,12 @@ object ZipkinComponent {
       "state" -> zc.state.toString,
       "constraints" -> Util.formatConstraints(zc.constraints),
       "task" -> Option(zc.task),
+      "stickiness" -> Option(zc.stickiness),
       "config" -> zc.config
     )
   }
 
-  def configureInstance[E <: ZipkinComponent](zc: E, task: Option[Task], constraints: Map[String, List[Constraint]],
+  def configureInstance[E <: ZipkinComponent](zc: E, task: Option[Task], stickiness: Option[Stickiness], constraints: Map[String, List[Constraint]],
                                               state: String, config: TaskConfig): E = {
     state match {
       case "Added" => zc.state = Added
@@ -234,6 +312,7 @@ object ZipkinComponent {
       case "Reconciling" => zc.state = Reconciling
     }
     zc.task = task.orNull
+    zc.stickiness = stickiness.orNull
     constraints.foreach(zc.constraints += _)
     zc.config.cpus = config.cpus
     zc.config.mem = config.mem
@@ -248,6 +327,7 @@ object ZipkinComponent {
 
   def readJson = (__ \ 'id).read[String] and
     (__ \ 'task).readNullable[Task] and
+    (__ \ 'stickiness).readNullable[Stickiness] and
     (__ \ 'constraints).read[String].map(Constraint.parse) and
     (__ \ 'state).read[String] and
     (__ \ 'config).read[TaskConfig]
@@ -276,7 +356,10 @@ case class Collector(override val id: String = "0") extends ZipkinComponent(id) 
   override def fetchAdminPort(): Option[String] = this.config.env.get("COLLECTOR_ADMIN_PORT")
 }
 
-case class QueryService(override val id: String = "0") extends ZipkinComponent(id) {
+case class QueryService(override val id: String = "0")
+  extends ZipkinComponent(id) {
+
+  stickiness = Stickiness()
 
   override def componentName = "query"
 
@@ -329,8 +412,8 @@ object Collector {
     def writes(zc: Collector): JsValue = ZipkinComponent.writeJson(zc)
   }
 
-  implicit val reader = ZipkinComponent.readJson((id, task, constraints, state, config) => {
-    ZipkinComponent.configureInstance(Collector(id), task, constraints, state, config)
+  implicit val reader = ZipkinComponent.readJson((id, task, stickiness, constraints, state, config) => {
+    ZipkinComponent.configureInstance(Collector(id), task, stickiness, constraints, state, config)
   })
 }
 
@@ -339,8 +422,8 @@ object QueryService {
     def writes(zc: QueryService): JsValue = ZipkinComponent.writeJson(zc)
   }
 
-  implicit val reader = ZipkinComponent.readJson((id, task, constraints, state, config) => {
-    ZipkinComponent.configureInstance(QueryService(id), task, constraints, state, config)
+  implicit val reader = ZipkinComponent.readJson((id, task, stickiness, constraints, state, config) => {
+    ZipkinComponent.configureInstance(QueryService(id), task, stickiness, constraints, state, config)
   })
 }
 
@@ -349,7 +432,7 @@ object WebService {
     def writes(zc: WebService): JsValue = ZipkinComponent.writeJson(zc)
   }
 
-  implicit val reader = ZipkinComponent.readJson((id, task, constraints, state, config) => {
-    ZipkinComponent.configureInstance(WebService(id), task, constraints, state, config)
+  implicit val reader = ZipkinComponent.readJson((id, task, stickiness, constraints, state, config) => {
+    ZipkinComponent.configureInstance(WebService(id), task, stickiness, constraints, state, config)
   })
 }

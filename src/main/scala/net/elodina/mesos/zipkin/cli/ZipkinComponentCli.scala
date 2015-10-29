@@ -5,7 +5,7 @@ import java.io.PrintStream
 import joptsimple.OptionParser
 import net.elodina.mesos.zipkin.components._
 import net.elodina.mesos.zipkin.http.ApiResponse
-import net.elodina.mesos.zipkin.utils.Util
+import net.elodina.mesos.zipkin.utils.{Str, Util}
 import play.api.libs.json.JsValue
 
 object ZipkinComponentCli {
@@ -30,12 +30,9 @@ object ZipkinComponentCli {
 
     cmd match {
       case "collector" =>
-        handleComponentCommand(cmd, subCmd.get, idExpr, refinedArgs, help,
-        {(x: JsValue) => x.as[ApiResponse[Collector]]})
-      case "query" => handleComponentCommand(cmd, subCmd.get, idExpr, refinedArgs, help,
-      {(x: JsValue) => x.as[ApiResponse[QueryService]]})
-      case "web" => handleComponentCommand(cmd, subCmd.get, idExpr, refinedArgs, help,
-      {(x: JsValue) => x.as[ApiResponse[WebService]]})
+        handleComponentCommand(cmd, subCmd.get, idExpr, refinedArgs, help, { (x: JsValue) => x.as[ApiResponse[Collector]] })
+      case "query" => handleComponentCommand(cmd, subCmd.get, idExpr, refinedArgs, help, { (x: JsValue) => x.as[ApiResponse[QueryService]] })
+      case "web" => handleComponentCommand(cmd, subCmd.get, idExpr, refinedArgs, help, { (x: JsValue) => x.as[ApiResponse[WebService]] })
     }
   }
 
@@ -77,8 +74,8 @@ object ZipkinComponentCli {
   }
 
   private def handleAddConfig[E <: ZipkinComponent](componentName: String, deserializeJson: Option[JsValue => ApiResponse[E]] = None,
-                                            expr: Option[String] = None, help: Boolean = false, add: Boolean = true,
-                                            args: Array[String] = Array()): Unit = {
+                                                    expr: Option[String] = None, help: Boolean = false, add: Boolean = true,
+                                                    args: Array[String] = Array()): Unit = {
     val parser = newParser()
     configureTypedCLParser[java.lang.Double](parser, Map(
     "cpu" -> "cpu amount (0.5, 1, 2)",
@@ -118,7 +115,7 @@ object ZipkinComponentCli {
   }
 
   private def handleRemove[E <: ZipkinComponent](componentName: String, deserializeJson: Option[JsValue => ApiResponse[E]] = None,
-                                         expr: Option[String] = None, help: Boolean = false): Unit = {
+                                                 expr: Option[String] = None, help: Boolean = false): Unit = {
     if (help) {
       printHelp(componentName, "remove")
       return
@@ -130,7 +127,7 @@ object ZipkinComponentCli {
   }
 
   private def handleStop[E <: ZipkinComponent](componentName: String, deserializeJson: Option[JsValue => ApiResponse[E]] = None,
-                                       expr: Option[String] = None, help: Boolean = false): Unit = {
+                                               expr: Option[String] = None, help: Boolean = false): Unit = {
     if (help) {
       printHelp(componentName, "stop")
       return
@@ -141,7 +138,7 @@ object ZipkinComponentCli {
   }
 
   private def handleStart[E <: ZipkinComponent](componentName: String, deserializeJson: Option[JsValue => ApiResponse[E]] = None,
-                                        expr: Option[String] = None, help: Boolean = false, args: Array[String] = Array()): Unit = {
+                                                expr: Option[String] = None, help: Boolean = false, args: Array[String] = Array()): Unit = {
     val parser = newParser()
 
     configureCLParser(parser, Map("timeout" -> ("Time to wait for server to be started. " +
@@ -160,7 +157,7 @@ object ZipkinComponentCli {
   }
 
   private def handleList[E <: ZipkinComponent](componentName: String, deserializeJson: Option[JsValue => ApiResponse[E]] = None,
-                                       expr: Option[String] = None, help: Boolean = false): Unit = {
+                                               expr: Option[String] = None, help: Boolean = false): Unit = {
     if (help) {
       printHelp(componentName, "list")
       return
@@ -190,7 +187,16 @@ object ZipkinComponentCli {
     if (component.constraints.nonEmpty)
       printLine(s"constraints: ${Util.formatConstraints(component.constraints)}", indent + 1)
     printTaskConfig(component.config, indent + 1)
+    Option(component.stickiness).foreach(printStickiness(_, indent + 1))
     printLine()
+  }
+
+  private def printStickiness(stickiness: Stickiness, indent: Int = 0): Unit = {
+    var stickinessTxt = "stickiness: period:" + stickiness.period
+    stickiness.hostname.foreach(hostname => stickinessTxt += ", hostname:" + hostname)
+    stickiness.port.foreach(port => stickinessTxt += ", port:" + port)
+    stickiness.expireDate.foreach(ed => stickinessTxt += ", expires:" + Str.dateTime(ed))
+    printLine(stickinessTxt, indent)
   }
 
   private def printTaskConfig(config: TaskConfig, indent: Int = 0) {

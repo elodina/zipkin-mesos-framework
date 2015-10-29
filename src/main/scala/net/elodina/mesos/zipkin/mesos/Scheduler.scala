@@ -71,10 +71,10 @@ object Scheduler extends org.apache.mesos.Scheduler {
       acceptOfferForComponent(offer, cluster.webServices.toList, "web")
     })
     val declineReasons = tryAccept.foldLeft(ListBuffer[String]()) { (list, elem) =>
-        elem() match {
-          case Some(declineReason) => list.append(declineReason); list
-          case None => return list.toList
-        }
+      elem() match {
+        case Some(declineReason) => list.append(declineReason); list
+        case None => return list.toList
+      }
     }
     declineReasons.toList
   }
@@ -166,13 +166,23 @@ object Scheduler extends org.apache.mesos.Scheduler {
             onServerStarted(zipkinComponent, driver, status)
           }
         }.start()
+      case TaskState.TASK_LOST | TaskState.TASK_FAILED | TaskState.TASK_ERROR |
+           TaskState.TASK_FINISHED | TaskState.TASK_KILLED =>
+        onServerStop(zipkinComponent, status, taskId)
+      case _ => logger.warn("Got unexpected task state: " + status.getState)
+    }
+
+    Scheduler.cluster.save()
+  }
+
+  private def onServerStop[E <: ZipkinComponent](zipkinComponent: Option[E], status: TaskStatus, taskId: String) {
+    zipkinComponent.flatMap(zc => Option(zc.stickiness)).foreach(_.registerStop())
+    status.getState match {
       case TaskState.TASK_LOST | TaskState.TASK_FAILED | TaskState.TASK_ERROR =>
         onServerFailed(zipkinComponent, status)
       case TaskState.TASK_FINISHED | TaskState.TASK_KILLED => logger.info(s"Task $taskId has finished")
       case _ => logger.warn("Got unexpected task state: " + status.getState)
     }
-
-    Scheduler.cluster.save()
   }
 
   private def onServerStarted[E <: ZipkinComponent](serverOpt: Option[E], driver: SchedulerDriver, status: TaskStatus) {
@@ -182,6 +192,7 @@ object Scheduler extends org.apache.mesos.Scheduler {
           if (server.state != Running) {
             logger.info(s"Set zipkin ${server.componentName} ${server.id} as running")
             server.state = Running
+            Option(server.stickiness).foreach(_.registerStart(server.config.hostname, server.fetchRunningInstancePort()))
           }
         }
       case None =>
