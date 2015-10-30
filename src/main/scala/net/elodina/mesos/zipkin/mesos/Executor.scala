@@ -13,6 +13,8 @@ object Executor extends org.apache.mesos.Executor {
 
   private val logger = Logger.getLogger(Executor.getClass)
 
+  @volatile private var keepGeneratingTraces = true
+
   private val zipkinServer = new ZipkinComponentServer
 
   def main(args: Array[String]) {
@@ -65,6 +67,9 @@ object Executor extends org.apache.mesos.Executor {
           val taskConfig = Json.parse(task.getData.toStringUtf8).as[TaskConfig]
           zipkinServer.start(taskConfig, task.getTaskId.getValue)
           driver.sendStatusUpdate(TaskStatus.newBuilder().setTaskId(task.getTaskId).setState(TaskState.TASK_RUNNING).build)
+
+          generateTraces(driver)
+
           zipkinServer.await().foreach(exitCode => if (exitCode != 0) {
             logger.error(s"Zipkin component process finished with exitCode $exitCode")
           })
@@ -75,6 +80,7 @@ object Executor extends org.apache.mesos.Executor {
             logger.info("The task has failed for an unknown reason")
             TaskState.TASK_FAILED
           }
+          keepGeneratingTraces = false
           driver.sendStatusUpdate(TaskStatus.newBuilder().setTaskId(task.getTaskId).setState(statusToSend).build)
         } catch {
           case t: Throwable =>
@@ -86,6 +92,24 @@ object Executor extends org.apache.mesos.Executor {
       }
     }.start()
 
+  }
+
+  private def generateTraces(driver: ExecutorDriver): Unit = {
+    if (System.getProperty("genTraces") != null) {
+      new Thread {
+        override def run(): Unit = {
+          while (keepGeneratingTraces) {
+            try {
+              Thread.sleep(1000)
+            } catch {
+              case e: InterruptedException => //ignore
+            }
+            driver.sendFrameworkMessage("".getBytes)
+            // Here where tracing goes
+          }
+        }
+      }.start()
+    }
   }
 
   private def initLogging() {

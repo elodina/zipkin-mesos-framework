@@ -27,6 +27,7 @@ object Config {
   val DEFAULT_FILE = new File("zipkin-mesos.properties")
 
   var debug: Boolean = false
+  var genTraces: Boolean = false
   var storage: String = "file:zipkin-mesos.json"
 
   var master: Option[String] = None
@@ -76,6 +77,7 @@ object Config {
     stream.close()
 
     if (props.containsKey("debug")) debug = java.lang.Boolean.valueOf(props.getProperty("debug"))
+    if (props.containsKey("genTraces")) genTraces = java.lang.Boolean.valueOf(props.getProperty("genTraces"))
     if (props.containsKey("storage")) storage = props.getProperty("storage")
 
     if (props.containsKey("master")) master = Some(props.getProperty("master"))
@@ -98,7 +100,7 @@ object Config {
         |mesos: master=$master, user=${if (user.isEmpty || user.get.isEmpty) "<default>" else user}
         |principal=${principal.getOrElse("<none>")}, secret=${if (secret.isDefined) "*****" else "<none>"}
         |framework: name=$frameworkName, role=$frameworkRole, timeout=$frameworkTimeout
-        |api: $api, bind-address: ${bindAddress.getOrElse("<all>")}}
+        |api: $api, bind-address: ${bindAddress.getOrElse("<all>")}, genTraces: $genTraces
     """.stripMargin.trim
   }
 }

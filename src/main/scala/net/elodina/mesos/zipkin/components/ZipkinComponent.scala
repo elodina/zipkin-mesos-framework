@@ -170,7 +170,7 @@ sealed abstract class ZipkinComponent(val id: String = "0") {
   }
 
   private[zipkin] def newExecutor(id: String): ExecutorInfo = {
-    val cmd = s"java -cp ${HttpServer.jar.getName}${if (Config.debug) " -Ddebug" else ""} net.elodina.mesos.zipkin.mesos.Executor"
+    val cmd = s"java -cp ${HttpServer.jar.getName}${if (Config.debug) " -Ddebug" else ""}${if (Config.genTraces) " -DgenTraces" else ""} net.elodina.mesos.zipkin.mesos.Executor"
 
     val commandBuilder = CommandInfo.newBuilder()
     commandBuilder

@@ -8,12 +8,15 @@ import net.elodina.mesos.zipkin.mesos.Scheduler
 import net.elodina.mesos.zipkin.utils.{BindAddress, Period}
 
 object SchedulerCli {
-  def isEnabled: Boolean = System.getenv("KM_NO_SCHEDULER") == null
+  def isEnabled: Boolean = System.getenv("ZM_NO_SCHEDULER") == null
 
   def handle(args: Array[String], help: Boolean = false): Unit = {
     val parser = newParser()
 
     parser.accepts("debug", "Debug mode. Default - " + Config.debug)
+      .withRequiredArg().ofType(classOf[java.lang.Boolean])
+
+    parser.accepts("genTraces", "Make scheduler generate traces by sending random framework messages from executor to scheduler. Default - " + Config.genTraces)
       .withRequiredArg().ofType(classOf[java.lang.Boolean])
 
     configureCLParser(parser,
@@ -84,6 +87,8 @@ object SchedulerCli {
     val provideOption = "Provide either cli option or config default value"
 
     readCLProperty[java.lang.Boolean]("debug", options).foreach(Config.debug = _)
+
+    readCLProperty[java.lang.Boolean]("genTraces", options).foreach(Config.genTraces = _)
 
     readCLProperty[String]("storage", options).foreach(Config.storage = _)
 

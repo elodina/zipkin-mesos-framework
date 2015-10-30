@@ -131,6 +131,7 @@ object Scheduler extends org.apache.mesos.Scheduler {
 
   def frameworkMessage(driver: SchedulerDriver, executorId: ExecutorID, slaveId: SlaveID, data: Array[Byte]): Unit = {
     logger.info("[frameworkMessage] executor:" + Str.id(executorId.getValue) + " slave:" + Str.id(slaveId.getValue) + " data: " + new String(data))
+    // Here's where tracing goes
   }
 
   def disconnected(driver: SchedulerDriver): Unit = {
