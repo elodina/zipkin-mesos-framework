@@ -38,6 +38,8 @@ if (username.isDefined && password.isDefined) {
   Factory.cassandraPassword.parse(password.get)
 }
 
+Factory.keyspace.parse(sys.env.get("CASSANDRA_KEYSPACE").getOrElse("zipkin"))
+
 val storeBuilder = Store.Builder(
   new Builder[SpanStore]() {
     override def apply() = Factory.newCassandraStore()

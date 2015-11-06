@@ -16,8 +16,8 @@ buildDir = 'out/gradle'
 libsDirName = '../../'
 
 configurations {
-    pingTestCompile.extendsFrom testCompile
-    pingTestRuntime.extendsFrom testRuntime
+    genTracesTestCompile.extendsFrom testCompile
+    genTracesTestRuntime.extendsFrom testRuntime
 }
 
 sourceSets {
@@ -27,28 +27,28 @@ sourceSets {
     test {
         scala {
             srcDirs = ['src/test/scala']
-            exclude '**/KafkaPing.scala'
+            exclude '**/GenZipkinTraces.scala'
         }
     }
-    ping {
+    genTraces {
         scala {
             srcDirs = ['src/test/scala']
-            include '**/KafkaPing.scala'
+            include '**/GenZipkinTraces.scala'
+            compileClasspath = sourceSets.main.output + sourceSets.test.output + configurations.genTracesTestCompile
+            runtimeClasspath = output + compileClasspath + configurations.genTracesTestRuntime
         }
-        compileClasspath = sourceSets.main.output + sourceSets.test.output + configurations.pingTestCompile
-        runtimeClasspath = output + compileClasspath + configurations.pingTestRuntime
     }
 }
 
-task ping(type: Test) {
+task genTraces(type: Test) {
     description = 'Sends dummy annotation to Kafka span receiver.'
     group = 'verification'
-    testClassesDir = sourceSets.ping.output.classesDir
-    classpath = sourceSets.ping.runtimeClasspath
+    testClassesDir = sourceSets.genTraces.output.classesDir
+    classpath = sourceSets.genTraces.runtimeClasspath
 }
 
 allprojects {
-    tasks.matching { task -> task.name == "ping" }.all {
+    tasks.matching { task -> task.name == "genTraces" }.all {
         outputs.upToDateWhen { false }
     }
 }
@@ -68,9 +68,9 @@ dependencies {
     compile "javax.servlet:javax.servlet-api:3.0.1"
     compile "com.101tec:zkclient:0.5"
     compile "com.typesafe.play:play-json_2.10:2.3.9"
-    pingTestCompile "org.apache.kafka:kafka_2.11:0.8.2.1"
-    pingTestCompile "io.zipkin:zipkin-common:1.14.1"
-    pingTestCompile "io.zipkin:zipkin-receiver-kafka:1.14.1"
+    compile "com.github.kristofa:brave-core:3.0.0"
+    compile "org.apache.thrift:libthrift:0.9.3"
+    compile "org.apache.kafka:kafka_2.10:0.8.2.1"
 
     testCompile 'junit:junit:4.12'
 }
