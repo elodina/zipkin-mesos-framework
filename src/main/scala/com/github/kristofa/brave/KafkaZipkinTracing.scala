@@ -80,9 +80,9 @@ object KafkaZipkinTracing {
    * @param traceInfo trace info that may be provided from the client service
    * @param initNewTrace indicates whether we want to initiate new trace in case if trace info we got is absent or incomplete
    */
-  def initServerFromTraceInfo(traceInfo: Option[TraceInfo] = None, initNewTrace: Boolean = false): Unit = {
+  def initServerFromTraceInfo(traceInfo: Option[TraceInfo] = None, initNewTrace: Boolean = false, spanName: String = "unknown_request"): Unit = {
     def onIncompleteTraces = if (initNewTrace) {
-      { st: ServerTracer => st.setStateUnknown("someRequest") }
+      { st: ServerTracer => st.setStateUnknown(spanName) }
     } else {
       { st: ServerTracer => st.setStateNoTracing() }
     }
@@ -95,7 +95,7 @@ object KafkaZipkinTracing {
             defSpanId <- ti.spanId
             defTraceId <- ti.traceId
           } yield {
-              st.setStateCurrentTrace(defTraceId, defSpanId, ti.parentSpanId.map(_.asInstanceOf[java.lang.Long]).orNull, "someRequest")
+              st.setStateCurrentTrace(defTraceId, defSpanId, ti.parentSpanId.map(_.asInstanceOf[java.lang.Long]).orNull, spanName)
             }).getOrElse(onIncompleteTraces(st))
         } else {
           st.setStateNoTracing()
