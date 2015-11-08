@@ -1,12 +1,12 @@
 package com.github.kristofa.brave
 
-import java.io.{UnsupportedEncodingException, ByteArrayOutputStream}
+import java.io.{ByteArrayOutputStream, UnsupportedEncodingException}
 import java.net.InetAddress
 import java.nio.ByteBuffer
-import java.util.{UUID, Properties}
 import java.util.concurrent.CopyOnWriteArraySet
+import java.util.{Properties, UUID}
 
-import com.twitter.zipkin.gen.{Span, AnnotationType, BinaryAnnotation}
+import com.twitter.zipkin.gen.{AnnotationType, BinaryAnnotation, Span}
 import kafka.javaapi.producer.Producer
 import kafka.message.NoCompressionCodec
 import kafka.producer.{KeyedMessage, ProducerConfig}
@@ -74,17 +74,29 @@ object KafkaZipkinTracing {
     withBrave { brave => action(brave.serverTracer()) }
   }
 
-  def initServerFromTraceInfo(traceInfo: Option[TraceInfo] = None): Unit = {
+  /**
+   * Initiates tracing based on the data sent by client service
+   *
+   * @param traceInfo trace info that may be provided from the client service
+   * @param initNewTrace indicates whether we want to initiate new trace in case if trace info we got is absent or incomplete
+   */
+  def initServerFromTraceInfo(traceInfo: Option[TraceInfo] = None, initNewTrace: Boolean = false): Unit = {
+    def onIncompleteTraces = if (initNewTrace) {
+      { st: ServerTracer => st.setStateUnknown("someRequest") }
+    } else {
+      { st: ServerTracer => st.setStateNoTracing() }
+    }
+
     withServerTracer { st =>
       st.clearCurrentSpan()
-      traceInfo.fold(st.setStateUnknown("someRequest"))({ ti =>
+      traceInfo.fold(onIncompleteTraces(st))({ ti =>
         if (ti.sampled) {
           (for {
             defSpanId <- ti.spanId
             defTraceId <- ti.traceId
           } yield {
               st.setStateCurrentTrace(defTraceId, defSpanId, ti.parentSpanId.map(_.asInstanceOf[java.lang.Long]).orNull, "someRequest")
-            }).getOrElse(st.setStateUnknown("someRequest"))
+            }).getOrElse(onIncompleteTraces(st))
         } else {
           st.setStateNoTracing()
         }
@@ -141,17 +153,17 @@ case class KafkaSpanCollector(producerConfig: ProducerConfig,
       val baos = new ByteArrayOutputStream()
       val streamProtocol = new TBinaryProtocol.Factory().getProtocol(new TIOStreamTransport(baos))
 
-        if (span != null) {
-          baos.reset()
-          try {
-            span.write(streamProtocol)
-            producer.send(new KeyedMessage[Array[Byte], Array[Byte]]("zipkin", baos.toByteArray))
-          } catch {
-            case e: TException =>
-              logger.warn(s"Logging span failed. " +
-                s"Span ${span.getName} with id ${span.getId}, trace id ${span.getTrace_id} is lost!", e)
-          }
+      if (span != null) {
+        baos.reset()
+        try {
+          span.write(streamProtocol)
+          producer.send(new KeyedMessage[Array[Byte], Array[Byte]]("zipkin", baos.toByteArray))
+        } catch {
+          case e: TException =>
+            logger.warn(s"Logging span failed. " +
+              s"Span ${span.getName} with id ${span.getId}, trace id ${span.getTrace_id} is lost!", e)
         }
+      }
     } catch {
       case e: Exception => logger.warn(s"Couldn't log spans while flushing. Unexpected error occurred", e)
     }
