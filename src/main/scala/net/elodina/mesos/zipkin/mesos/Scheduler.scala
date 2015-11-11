@@ -14,6 +14,7 @@ import org.apache.log4j._
 import org.apache.mesos.Protos._
 import org.apache.mesos.{MesosSchedulerDriver, SchedulerDriver}
 import scala.collection.JavaConversions._
+import scala.collection.JavaConverters._
 import scala.collection.mutable.ListBuffer
 import scala.concurrent.duration._
 import scala.language.postfixOps
@@ -310,6 +311,9 @@ object Scheduler extends org.apache.mesos.Scheduler {
       logger.info(s"Reconciling exceeded $RECONCILE_MAX_TRIES tries for ${zc.componentName} ${zc.id}, sending killTask for task ${zc.task.id}")
       driver.killTask(TaskID.newBuilder().setValue(zc.task.id).build())
       zc.task = null
+      // Resurrects the task in case if TASK_LOST update has not been send
+      Option(zc.stickiness).foreach(_.registerStop())
+      zc.state = Stopped
     }
   }
 
