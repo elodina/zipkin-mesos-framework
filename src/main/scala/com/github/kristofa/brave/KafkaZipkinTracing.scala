@@ -157,7 +157,7 @@ case class KafkaSpanCollector(producerConfig: ProducerConfig,
         baos.reset()
         try {
           span.write(streamProtocol)
-          producer.send(new KeyedMessage[Array[Byte], Array[Byte]]("zipkin", baos.toByteArray))
+          producer.send(new KeyedMessage[Array[Byte], Array[Byte]](kafkaTopic, baos.toByteArray))
         } catch {
           case e: TException =>
             logger.warn(s"Logging span failed. " +
