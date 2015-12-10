@@ -1,7 +1,7 @@
 Zipkin Mesos Framework
 ======================
 
-This is still being developed actively and is not yet alpha.
+This framework is being actively developed by Elodina Inc. and is available as a free trial. In the event that community support is sufficient, Elodina plans to release the framework as an open source project distributed under the Apache License, Version 2.0.
 
 Prerequisites
 -------------
