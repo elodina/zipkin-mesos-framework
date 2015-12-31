@@ -1,4 +1,4 @@
-PISAURA a Zipkin Mesos Framework
+Zipkin Mesos Framework
 ======================
 
 Zipkin is a distributed tracing system. It helps gather timing data needed to troubleshoot latency problems in microservice architectures. It manages both the collection and lookup of this data through a Collector and a Query service.  
