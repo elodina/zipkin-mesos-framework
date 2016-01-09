@@ -6,7 +6,7 @@ This directory contains a `template.json` file to allow running the scheduler in
 You may feed it to Marathon API via a standard `POST /v2/apps` call:
 
 ```
-# curl -X POST -T template.json http://master:8080/v2/apps
+# curl -H "Content-type: application/json" -X POST -T template.json http://master:8080/v2/apps
 ```
 
 You will definitely want to change URI list and point it to some working artifact server so that Marathon can find necessary files for the scheduler.

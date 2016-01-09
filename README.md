@@ -147,7 +147,7 @@ instance:
     configFile: collector-cassandra.scala
 ```
 
-Now lets start the server. This call to CLI will block until the server is actually started, but will wait no more than 
+Now let's start the server. This call to CLI will block until the server is actually started, but will wait no more than 
 a configured timeout. Timeout can be passed via `--timeout` flag and defaults to `60s`. If a timeout of `0ms` is passed 
 CLI won't wait for servers to start at all and will reply with "Scheduled servers ..." message.
 
@@ -225,11 +225,11 @@ After the start, you may open the web service's `endpoint` address in your brows
 Verifying all components running
 ================================
 
-In order to verify that all the services running correctly, simply run a `ping` task on this project. Make sure to 
+In order to verify that all the services running correctly, simply run `genTraces` task on this project. Make sure to 
 configure task to produce traces to the Kafka topic, from which your collector is consuming traces:
  
 ```
-# KAFKA_BROKER=localhost:9092 KAFKA_TOPIC=notzipkin ./gradlew ping
+# KAFKA_BROKER=localhost:9092 KAFKA_TOPIC=notzipkin ./gradlew genTraces
 ``` 
 
 This will post a dummy trace annotation to the specified topic. You should be able to see it in Zipkin web UI.
